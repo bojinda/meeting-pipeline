@@ -80,13 +80,25 @@ if "${CMD[@]}" >"$LOGFILE" 2>&1; then
 
   LATEST_JSON="$(ls -t "$OUTDIR"/*.json 2>/dev/null | head -n 1)"
   if [ -n "$LATEST_JSON" ]; then
-    if python "$BASE_DIR/bin/transcript_chunker.py" "$LATEST_JSON" >> "$LOGFILE" 2>&1; then
+    if python "$BASE_DIR/bin/transcript_chunker.py" "$LATEST_JSON" \
+        --target-words "${TRANSCRIPT_CHUNK_TARGET_WORDS:-1400}" \
+        --max-words "${TRANSCRIPT_CHUNK_MAX_WORDS:-2200}" >> "$LOGFILE" 2>&1; then
       echo "Chunking: yes" >> "$STATUSFILE"
     else
       echo "Chunking: failed" >> "$STATUSFILE"
     fi
   else
     echo "Chunking: no JSON found" >> "$STATUSFILE"
+  fi
+
+  if [ -f "$OUTDIR/chunks_out/transcript_chunks.jsonl" ]; then
+    if python "$BASE_DIR/bin/ollama_meeting_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
+      echo "Summaries: yes" >> "$STATUSFILE"
+    else
+      echo "Summaries: failed" >> "$STATUSFILE"
+    fi
+  else
+    echo "Summaries: no chunks found" >> "$STATUSFILE"
   fi
 
 else
