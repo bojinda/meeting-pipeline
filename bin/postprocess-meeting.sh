@@ -3,7 +3,7 @@ set -euo pipefail
 
 INPUT="$1"
 BASE="$(basename "$INPUT" .wav)"
-OUTDIR="$HOME/meeting-transcripts/$BASE"
+OUTDIR="$HOME/meeting-pipeline/meeting-transcripts/$BASE"
 
 mkdir -p "$OUTDIR"
 

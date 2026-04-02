@@ -2,10 +2,10 @@
 set -euo pipefail
 
 STAMP="$(date +%F-%H%M%S)"
-OUT="$HOME/meeting-recordings/union-meeting-$STAMP.wav"
+OUT="$HOME/meeting-pipeline/meeting-recordings/union-meeting-$STAMP.wav"
 
-mkdir -p "$HOME/meeting-recordings" "$HOME/meeting-transcripts" "$HOME/meeting-summaries"
-echo "$OUT" > "$HOME/meeting-recordings/last_recording.txt"
+mkdir -p "$HOME/meeting-pipeline/meeting-recordings" "$HOME/meeting-pipeline/meeting-transcripts" "$HOME/meeting-pipeline/meeting-summaries"
+echo "$OUT" > "$HOME/meeting-pipeline/meeting-recordings/last_recording.txt"
 
 ffmpeg -nostdin -hide_banner -loglevel warning \
   -f s16le -ar 16000 -ac 1 \
