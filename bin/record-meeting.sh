@@ -14,5 +14,5 @@ ffmpeg -nostdin -hide_banner -loglevel warning \
   "$OUT"
 
 if [ -s "$OUT" ]; then
-  "$HOME/bin/postprocess-meeting.sh" "$OUT" &
+  "$(dirname "$0")/postprocess-meeting.sh" "$OUT" &
 fi
