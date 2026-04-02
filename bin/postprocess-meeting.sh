@@ -77,6 +77,18 @@ if "${CMD[@]}" >"$LOGFILE" 2>&1; then
     echo "Completed: $(date -Is)"
     echo "Success: yes"
   } >> "$STATUSFILE"
+
+  LATEST_JSON="$(ls -t "$OUTDIR"/*.json 2>/dev/null | head -n 1)"
+  if [ -n "$LATEST_JSON" ]; then
+    if python "$BASE_DIR/bin/transcript_chunker.py" "$LATEST_JSON" >> "$LOGFILE" 2>&1; then
+      echo "Chunking: yes" >> "$STATUSFILE"
+    else
+      echo "Chunking: failed" >> "$STATUSFILE"
+    fi
+  else
+    echo "Chunking: no JSON found" >> "$STATUSFILE"
+  fi
+
 else
   {
     echo "Completed: $(date -Is)"
