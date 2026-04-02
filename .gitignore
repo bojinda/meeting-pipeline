@@ -1,0 +1,39 @@
+
+`.gitignore`
+```gitignore
+# Environment / secrets
+.env
+config/.env
+config/*.local
+*.secret
+*.token
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Runtime outputs
+meeting-recordings/
+meeting-transcripts/
+meeting-summaries/
+tmp/
+cache/
+
+# Audio / transcript artifacts
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.json
+*.srt
+*.vtt

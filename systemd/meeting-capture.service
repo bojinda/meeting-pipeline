@@ -1,0 +1,15 @@
+[Unit]
+Description=Union meeting audio capture
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bojinda
+WorkingDirectory=/home/bojinda/meeting-pipeline
+ExecStart=/home/bojinda/meeting-pipeline/bin/record-meeting.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
