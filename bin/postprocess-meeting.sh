@@ -20,6 +20,7 @@ fi
 : "${WHISPERX_BATCH_SIZE:=4}"
 : "${WHISPERX_COMPUTE_TYPE:=float16}"
 : "${WHISPERX_DEVICE:=cuda}"
+: "${WHISPERX_LANGUAGE:=en}"
 
 BASE="$(basename "$INPUT" .wav)"
 OUTDIR="$OUT_ROOT/$BASE"
@@ -44,6 +45,7 @@ CMD=(
   --batch_size "$WHISPERX_BATCH_SIZE"
   --compute_type "$WHISPERX_COMPUTE_TYPE"
   --device "$WHISPERX_DEVICE"
+  --language "$WHISPERX_LANGUAGE"
   --diarize
   --hf_token "$HF_TOKEN"
   --output_dir "$OUTDIR"
@@ -57,9 +59,16 @@ if [ -n "${WHISPERX_MAX_SPEAKERS:-}" ]; then
   CMD+=(--max_speakers "$WHISPERX_MAX_SPEAKERS")
 fi
 
+SAFE_CMD=("${CMD[@]}")
+for i in "${!SAFE_CMD[@]}"; do
+  if [ "${SAFE_CMD[$i]}" = "--hf_token" ] && [ $((i+1)) -lt ${#SAFE_CMD[@]} ]; then
+    SAFE_CMD[$((i+1))]="[REDACTED]"
+  fi
+done
+
 {
   printf 'Command: '
-  printf '%q ' "${CMD[@]}"
+  printf '%q ' "${SAFE_CMD[@]}"
   printf '\n\n'
 } >> "$STATUSFILE"
 
