@@ -50,6 +50,49 @@ def segment_text(seg: dict) -> str:
     return (seg.get("text") or "").strip()
 
 MAX_SAME_SPEAKER_GAP = 5.0
+TAIL_MERGE_MAX_WORDS = 450
+
+
+def split_oversized_turns(turns: List[dict], target_words: int, max_words: int) -> List[dict]:
+    out: List[dict] = []
+
+    for turn in turns:
+        words = turn["text"].split()
+        if len(words) <= max_words:
+            out.append(turn)
+            continue
+
+        step = target_words
+        for i in range(0, len(words), step):
+            subtext = " ".join(words[i:i + step]).strip()
+            out.append({
+                "speaker": turn["speaker"],
+                "start": turn["start"],
+                "end": turn["end"],
+                "text": subtext,
+            })
+
+    return out
+
+
+def merge_short_tail_chunk(chunks: List[List[dict]], max_words: int, tail_merge_max_words: int) -> List[List[dict]]:
+    if len(chunks) < 2:
+        return chunks
+
+    tail = chunks[-1]
+    tail_words = sum(count_words(seg["text"]) for seg in tail)
+
+    if tail_words > tail_merge_max_words:
+        return chunks
+
+    prev = chunks[-2]
+    prev_words = sum(count_words(seg["text"]) for seg in prev)
+
+    if prev_words + tail_words <= max_words:
+        chunks[-2] = prev + tail
+        chunks.pop()
+
+    return chunks
 
 def merge_segments_into_turns(segments: List[dict]) -> List[dict]:
     turns: List[dict] = []
@@ -94,6 +137,7 @@ def merge_segments_into_chunks(
     max_words: int,
 ) -> List[List[dict]]:
     turns = merge_segments_into_turns(segments)
+    turns = split_oversized_turns(turns, target_words=target_words, max_words=max_words)
 
     chunks: List[List[dict]] = []
     current: List[dict] = []
@@ -110,8 +154,7 @@ def merge_segments_into_chunks(
         would_exceed_max = current_words + turn_words > max_words
         near_target = current_words >= target_words
 
-        # Only break BETWEEN turns, so every chunk starts with a new speaker
-        # and ends after the previous speaker finishes.
+        # break only BETWEEN complete turns
         if would_exceed_max or near_target:
             chunks.append(current)
             current = [turn]
@@ -123,29 +166,13 @@ def merge_segments_into_chunks(
     if current:
         chunks.append(current)
 
-    # Fallback: if one single speaker turn is too large, split it by size.
-    final_chunks: List[List[dict]] = []
-    for chunk in chunks:
-        if len(chunk) == 1 and count_words(chunk[0]["text"]) > max_words:
-            text = chunk[0]["text"]
-            speaker = chunk[0]["speaker"]
-            start = chunk[0]["start"]
-            end = chunk[0]["end"]
+    chunks = merge_short_tail_chunk(
+        chunks,
+        max_words=max_words,
+        tail_merge_max_words=TAIL_MERGE_MAX_WORDS,
+    )
 
-            words = text.split()
-            step = target_words
-            for i in range(0, len(words), step):
-                subtext = " ".join(words[i:i + step]).strip()
-                final_chunks.append([{
-                    "speaker": speaker,
-                    "start": start,
-                    "end": end,
-                    "text": subtext,
-                }])
-        else:
-            final_chunks.append(chunk)
-
-    return final_chunks
+    return chunks
 
 
 def chunk_type_for(chunk: List[dict]) -> str:
