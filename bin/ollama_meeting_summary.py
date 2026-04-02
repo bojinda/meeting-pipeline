@@ -18,6 +18,8 @@ def call_ollama(
     keep_alive: str = "30m",
     temperature: float = 0.2,
 ) -> str:
+    print(f"[ollama] model={model} prompt_chars={len(prompt)}", flush=True)
+
     payload: dict[str, Any] = {
         "model": model,
         "prompt": prompt,
@@ -138,7 +140,8 @@ def main() -> int:
     )
 
     chunk_summaries: list[dict] = []
-    for chunk in chunks:
+    for idx, chunk in enumerate(chunks, start=1):
+        print(f"[map] summarizing chunk {idx}/{len(chunks)} (chunk_id={chunk['chunk_id']})", flush=True)
         summary = call_ollama(
             ollama_url=args.ollama_url,
             model=args.map_model,
@@ -212,7 +215,7 @@ Requirements:
 Chunk summaries:
 {combined}
 """
-
+    print("[reduce] writing summary.md", flush=True)
     summary_md = call_ollama(
         ollama_url=args.ollama_url,
         model=args.reduce_model,
@@ -223,6 +226,7 @@ Chunk summaries:
     )
     (summaries_dir / "summary.md").write_text(summary_md + "\n", encoding="utf-8")
 
+    print("[reduce] writing action-items.md", flush=True)
     actions_md = call_ollama(
         ollama_url=args.ollama_url,
         model=args.reduce_model,
@@ -233,6 +237,7 @@ Chunk summaries:
     )
     (summaries_dir / "action-items.md").write_text(actions_md + "\n", encoding="utf-8")
 
+    print("[reduce] writing minutes-draft.md", flush=True)
     minutes_md = call_ollama(
         ollama_url=args.ollama_url,
         model=args.reduce_model,
