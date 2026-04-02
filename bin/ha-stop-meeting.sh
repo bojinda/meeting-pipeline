@@ -25,7 +25,7 @@ ssh \
   -o BatchMode=yes \
   -o ConnectTimeout=10 \
   "$WINDOWS_USER@$WINDOWS_HOST" \
-  "powershell -NoProfile -ExecutionPolicy Bypass -File \"$WINDOWS_STOP_SCRIPT\"" \
+  "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path '$WINDOWS_STOP_SCRIPT') { & '$WINDOWS_STOP_SCRIPT' } else { Write-Error 'Stop script not found: $WINDOWS_STOP_SCRIPT'; exit 1 }\"" \
   >> "$MEETING_CONTROL_LOG" 2>&1
 
 echo "[$(date -Is)] STOP command sent successfully" >> "$MEETING_CONTROL_LOG"
