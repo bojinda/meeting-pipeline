@@ -15,7 +15,7 @@ ffmpeg -nostdin -hide_banner -loglevel warning \
   -f s16le -ar 16000 -ac 1 \
   -i tcp://0.0.0.0:4000?listen=1 \
   -c:a pcm_s16le \
-  "$OUT"
+  "$OUT" || true
 
 if [ -s "$OUT" ]; then
   printf '%s\n' "$OUT" > "$RECORDINGS_DIR/last_recording.txt"
