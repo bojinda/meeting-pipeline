@@ -19,5 +19,4 @@ ffmpeg -nostdin -hide_banner -loglevel warning \
 
 if [ -s "$OUT" ]; then
   printf '%s\n' "$OUT" > "$RECORDINGS_DIR/last_recording.txt"
-  "$(dirname "$0")/postprocess-meeting.sh" "$OUT" &
 fi
