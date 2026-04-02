@@ -17,8 +17,13 @@ def call_ollama(
     system: str = "",
     keep_alive: str = "30m",
     temperature: float = 0.2,
+    num_ctx: int | None = None,
 ) -> str:
-    print(f"[ollama] model={model} prompt_chars={len(prompt)}", flush=True)
+    options = {
+        "temperature": temperature,
+    }
+    if num_ctx is not None:
+        options["num_ctx"] = num_ctx
 
     payload: dict[str, Any] = {
         "model": model,
@@ -26,9 +31,7 @@ def call_ollama(
         "system": system,
         "stream": False,
         "keep_alive": keep_alive,
-        "options": {
-            "temperature": temperature,
-        },
+        "options": options,
     }
 
     req = urllib.request.Request(
@@ -119,6 +122,8 @@ def main() -> int:
     )    
     keep_alive = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
     temperature = float(os.environ.get("OLLAMA_TEMPERATURE", "0.2"))
+    map_num_ctx = int(os.environ.get("OLLAMA_MAP_NUM_CTX", "16384"))
+    reduce_num_ctx = int(os.environ.get("OLLAMA_REDUCE_NUM_CTX", "32768"))
     args = parser.parse_args()
     transcript_dir = args.transcript_dir
     chunks_jsonl = transcript_dir / "chunks_out" / "transcript_chunks.jsonl"
@@ -126,7 +131,13 @@ def main() -> int:
         print(f"Missing chunk index: {chunks_jsonl}", file=sys.stderr)
         return 1
 
-    summaries_dir = transcript_dir / "summaries"
+    summary_root = Path(
+        os.environ.get(
+            "MEETING_SUMMARIES_ROOT",
+            str(transcript_dir.parent.parent / "meeting-summaries"),
+        )
+    )
+    summaries_dir = summary_root / transcript_dir.name
     summaries_dir.mkdir(parents=True, exist_ok=True)
 
     chunks = load_jsonl(chunks_jsonl)
@@ -149,6 +160,7 @@ def main() -> int:
             system=chunk_system,
             keep_alive=keep_alive,
             temperature=temperature,
+            num_ctx=map_num_ctx,
         )
 
         row = {
@@ -223,6 +235,7 @@ Chunk summaries:
         system=reduce_system,
         keep_alive=keep_alive,
         temperature=temperature,
+        num_ctx=reduce_num_ctx,
     )
     (summaries_dir / "summary.md").write_text(summary_md + "\n", encoding="utf-8")
 
@@ -234,6 +247,7 @@ Chunk summaries:
         system=reduce_system,
         keep_alive=keep_alive,
         temperature=temperature,
+        num_ctx=reduce_num_ctx,
     )
     (summaries_dir / "action-items.md").write_text(actions_md + "\n", encoding="utf-8")
 
@@ -245,6 +259,7 @@ Chunk summaries:
         system=reduce_system,
         keep_alive=keep_alive,
         temperature=temperature,
+        num_ctx=reduce_num_ctx,
     )
     (summaries_dir / "minutes-draft.md").write_text(minutes_md + "\n", encoding="utf-8")
 

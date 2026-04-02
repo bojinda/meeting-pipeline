@@ -94,6 +94,7 @@ if "${CMD[@]}" >"$LOGFILE" 2>&1; then
   if [ -f "$OUTDIR/chunks_out/transcript_chunks.jsonl" ]; then
     if python "$BASE_DIR/bin/ollama_meeting_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
       echo "Summaries: yes" >> "$STATUSFILE"
+      echo "Summary dir: ${MEETING_SUMMARIES_ROOT:-$BASE_DIR/meeting-summaries}/$(basename "$OUTDIR")" >> "$STATUSFILE"
     else
       echo "Summaries: failed" >> "$STATUSFILE"
     fi
