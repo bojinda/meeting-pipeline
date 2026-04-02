@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for new meeting recordings
+
+[Path]
+PathModified=/home/bojinda/meeting-pipeline/meeting-recordings/last_recording.txt
+
+[Install]
+WantedBy=multi-user.target
