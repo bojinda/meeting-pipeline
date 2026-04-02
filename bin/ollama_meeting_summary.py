@@ -58,12 +58,18 @@ def load_jsonl(path: Path) -> list[dict]:
 
 
 def build_chunk_prompt(chunk: dict) -> str:
-    return f"""You are summarizing one chunk from a meeting-style transcript.
+    return f"""You are summarizing one chunk from a formal or semi-formal meeting transcript.
 
-Be accurate and conservative.
-Do not invent names, decisions, motions, or action items.
-If a point is unclear, say so.
-Use speaker labels exactly as given if no real names are known.
+Be strict, conservative, and literal.
+
+Rules:
+- Do not invent names, decisions, motions, votes, or action items.
+- Only list an action item if someone explicitly assigns, requests, volunteers for, commits to, schedules, or agrees to do something.
+- Only list a decision if a choice is clearly made, confirmed, or approved.
+- Only list a motion or proposal if one is explicitly proposed.
+- Do not convert discussion topics, examples, jokes, hypotheticals, media shown, things under review, or things people talk about into action items.
+- If something is merely discussed, put it under Topics or Important notes, not Action items or Decisions.
+- If uncertain, prefer "None noted."
 
 Chunk metadata:
 - Chunk ID: {chunk.get("chunk_id")}
@@ -74,7 +80,7 @@ Chunk metadata:
 Transcript chunk:
 {chunk.get("text", "")}
 
-Write a concise markdown summary with exactly these sections:
+Write concise markdown with exactly these sections:
 
 ## Topics
 ## Decisions or tentative decisions
@@ -83,7 +89,10 @@ Write a concise markdown summary with exactly these sections:
 ## Open questions or unresolved issues
 ## Important notes
 
-For any empty section, write: None noted.
+Requirements:
+- Use short bullets.
+- In Action items, include owner only if clearly known.
+- If a section has nothing explicit, write: None noted.
 """
 
 
@@ -187,11 +196,17 @@ def main() -> int:
 
     summary_prompt = f"""Using the ordered chunk summaries below, write a concise executive summary in markdown.
 
+Rules:
+- Be conservative and do not infer tasks, decisions, or motions from discussion alone.
+- Preserve chronology.
+- If chunk summaries contain uncertainty, preserve that uncertainty.
+- Do not invent names or ownership.
+
 Requirements:
 - 1 short title
 - 1 brief overview paragraph
-- 5 to 10 bullet points covering the main topics in chronological order
-- Do not invent decisions or names
+- 5 to 10 bullets covering the main topics in chronological order
+- Do not include an Action Items section
 
 Chunk summaries:
 {combined}
@@ -199,18 +214,36 @@ Chunk summaries:
 
     actions_prompt = f"""Using the ordered chunk summaries below, write an action-items document in markdown.
 
-Requirements:
+Rules:
+- Only include an item if it is explicitly assigned, requested, volunteered for, scheduled, or clearly agreed.
+- Do not turn topics of discussion into action items.
+- Do not infer ownership.
+- If there are no explicit action items, output only:
+
+# Action Items
+
+No clear action items identified.
+
+Otherwise:
 - Title: Action Items
-- One bullet per action item
+- One bullet per explicit action item
 - Include owner only if clearly known
-- Include status like 'tentative' if uncertain
-- If none exist, write: No clear action items identified.
+- Include tentative status only if clearly stated
 
 Chunk summaries:
 {combined}
 """
 
     minutes_prompt = f"""Using the ordered chunk summaries below, write formal draft minutes in markdown.
+
+Rules:
+- Be conservative and literal.
+- Do not invent names, motions, votes, decisions, or action items.
+- Only include decisions that were clearly made.
+- Only include motions or proposals that were explicitly mentioned.
+- Only include action items that were explicitly assigned, requested, volunteered for, scheduled, or agreed.
+- Preserve chronology.
+- If a section has no explicit content, write: None noted.
 
 Requirements:
 - Title: Draft Minutes
@@ -221,8 +254,7 @@ Requirements:
   - Motions / Proposals Mentioned
   - Action Items
   - Open Questions
-- Keep chronology clear
-- Do not invent names, motions, or votes
+  - Important Notes
 
 Chunk summaries:
 {combined}
