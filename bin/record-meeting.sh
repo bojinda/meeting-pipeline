@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-STAMP="$(date +%F-%H%M%S)"
-OUT="$HOME/meeting-pipeline/meeting-recordings/union-meeting-$STAMP.wav"
+BASE_DIR="$HOME/meeting-pipeline"
+RECORDINGS_DIR="$BASE_DIR/meeting-recordings"
+TRANSCRIPTS_DIR="$BASE_DIR/meeting-transcripts"
+SUMMARIES_DIR="$BASE_DIR/meeting-summaries"
 
-mkdir -p "$HOME/meeting-pipeline/meeting-recordings" "$HOME/meeting-pipeline/meeting-transcripts" "$HOME/meeting-pipeline/meeting-summaries"
-echo "$OUT" > "$HOME/meeting-pipeline/meeting-recordings/last_recording.txt"
+mkdir -p "$RECORDINGS_DIR" "$TRANSCRIPTS_DIR" "$SUMMARIES_DIR"
+
+STAMP="$(date +%F-%H%M%S)"
+OUT="$RECORDINGS_DIR/union-meeting-$STAMP.wav"
 
 ffmpeg -nostdin -hide_banner -loglevel warning \
   -f s16le -ar 16000 -ac 1 \
@@ -14,5 +18,6 @@ ffmpeg -nostdin -hide_banner -loglevel warning \
   "$OUT"
 
 if [ -s "$OUT" ]; then
+  printf '%s\n' "$OUT" > "$RECORDINGS_DIR/last_recording.txt"
   "$(dirname "$0")/postprocess-meeting.sh" "$OUT" &
 fi
