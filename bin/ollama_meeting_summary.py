@@ -133,6 +133,8 @@ def main() -> int:
     temperature = float(os.environ.get("OLLAMA_TEMPERATURE", "0.2"))
     map_num_ctx = int(os.environ.get("OLLAMA_MAP_NUM_CTX", "16384"))
     reduce_num_ctx = int(os.environ.get("OLLAMA_REDUCE_NUM_CTX", "32768"))
+
+    print(f"[config] map_num_ctx={map_num_ctx} reduce_num_ctx={reduce_num_ctx}", flush=True)
     args = parser.parse_args()
     transcript_dir = args.transcript_dir
     chunks_jsonl = transcript_dir / "chunks_out" / "transcript_chunks.jsonl"
