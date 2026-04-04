@@ -1,39 +1,67 @@
 # Meeting Pipeline
 
-A self-hosted meeting recording, transcription, chunking, and summarization pipeline built around **FFmpeg**, **WhisperX**, **Ollama**, and optional **Home Assistant** controls.
+A self-hosted meeting recording, transcription, chunking, and summarization pipeline built around **WhisperX**, **speaker-aware chunking**, and **Ollama**.
 
-This project is designed for long-form audio such as meetings, conventions, discussions, or livestream-style recordings. It can automatically:
-
-- capture audio from a remote Windows machine
-- record the stream on Linux
-- transcribe audio with speaker diarization using WhisperX
-- split transcripts into speaker-aware chunks
-- summarize chunks with Ollama using a map/reduce workflow
-- generate:
-  - `summary.md`
-  - `action-items.md`
-  - `minutes-draft.md`
+It is designed to be modular and self-hosted: capture, transcription, summarization, and automation can be used together or independently.
 
 ## Features
 
-- **Remote audio capture** from a Windows source machine
-- **Automatic post-processing** after recording finishes
-- **WhisperX diarized transcription**
-- **Speaker-aware chunking** that avoids splitting mid-turn
-- **Ollama summarization** with separate map/reduce context sizes
-- **Markdown outputs** for review and editing
-- **Optional Home Assistant control layer** for start/stop buttons
-- **Environment-driven configuration** via `.env`
+- Remote or automated meeting audio capture
+- Diarized transcription with WhisperX
+- Speaker-aware transcript chunking
+- Map/reduce-style summarization with Ollama
+- Markdown outputs for:
+  - `summary.md`
+  - `action-items.md`
+  - `minutes-draft.md`
+- `.env`-driven configuration
+- Example `systemd` units for unattended automation
+- Optional Home Assistant controls
+- Optional webhook-driven automation when a meeting starts
 
-## High-Level Flow
+## Pipeline Overview
 
-1. Start audio transmission on the source machine
-2. Record the incoming stream on the Linux processing machine
-3. Trigger automatic post-processing when recording completes
-4. Run WhisperX transcription with diarization
-5. Convert transcript JSON into speaker-aware chunks
-6. Summarize chunks with Ollama
-7. Write outputs to a meeting-specific summary folder
+The typical flow is:
+
+1. Start meeting audio capture
+2. Record incoming audio to WAV
+3. Run WhisperX transcription with diarization
+4. Chunk the transcript into speaker-aware sections
+5. Summarize chunks with Ollama
+6. Write summary outputs to disk
+
+## Architecture
+
+A common setup looks like this:
+
+### Audio source host
+This can be:
+- a Windows machine capturing meeting/system audio
+- another host that can stream audio to the processing server
+
+### Processing host
+Runs:
+- audio capture listener
+- WhisperX
+- transcript chunker
+- Ollama summarization
+- optional systemd automation
+
+### Optional control layer
+You can trigger the pipeline via:
+- manual wrapper scripts
+- Home Assistant buttons/scripts
+- webhook automation when a meeting starts
+
+## Control Options
+
+This project supports multiple control styles:
+
+- **Manual start/stop** via wrapper scripts
+- **Home Assistant buttons/scripts** for dashboard control
+- **Webhook-driven automation** for automatic capture start
+
+The recommended design is to keep the capture/transcription/summarization logic on the processing host and use thin wrappers or webhooks for remote triggers.
 
 ## Project Structure
 
@@ -47,151 +75,230 @@ meeting-pipeline/
 │   └── ha-stop-meeting.sh
 ├── config/
 │   └── .env
+├── systemd/
+│   ├── meeting-capture.service
+│   ├── meeting-postprocess.path
+│   └── meeting-postprocess.service
 ├── meeting-recordings/
 ├── meeting-transcripts/
 └── meeting-summaries/
 ```
 
+## Requirements
+
+At a minimum, you will need:
+
+- a Linux processing host
+- Python environment for WhisperX
+- Ollama reachable over HTTP
+- a GPU strongly recommended for WhisperX and summarization
+- a Hugging Face read token for diarization-enabled WhisperX use
+
+Optional:
+- Home Assistant for UI control
+- a remote Windows audio source host
+- meeting-start webhooks or join-detection automation
+
 ## Outputs
 
-For each processed recording, the pipeline produces:
+For each processed recording, the pipeline generates:
 
-### Transcript output
-Located under:
+### Transcripts
+Stored under:
 
-```
-meeting-transcripts/<meeting-name>/
-```
-
-Typical files:
-
-- raw WhisperX transcript files (`.txt`, `.srt`, `.vtt`, `.json`, etc.)
-- `status.txt`
-- `whisperx.log`
-- `chunks_out/`
-
-### Summary output
-Located under:
-
-``` 
-meeting-summaries/<meeting-name>/
+```text
+meeting-transcripts/<meeting-folder>/
 ```
 
-Files:
+These typically include:
+- WhisperX transcript outputs
+- status/log files
+- chunked transcript files under `chunks_out/`
 
-- `chunk_summaries.jsonl`
+### Summaries
+Stored under:
+
+```text
+meeting-summaries/<meeting-folder>/
+```
+
+These include:
 - `summary.md`
 - `action-items.md`
 - `minutes-draft.md`
-
-## Requirements
-
-### Linux processing machine
-
-- Python environment for WhisperX
-- Ollama
-- FFmpeg
-- systemd
-- enough disk space for recordings and transcripts
-- NVIDIA GPU strongly recommended for WhisperX and larger Ollama models
-
-### Windows source machine (optional but supported)
-
-- FFmpeg
-- VB-Audio Virtual Cable or another audio routing method
-- OpenSSH server enabled
-- a start mechanism (for example a scheduled task)
-- a stop PowerShell script for ending the sender cleanly
-
-### Optional
-
-- Home Assistant for remote start/stop controls
+- `chunk_summaries.jsonl`
 
 ## Configuration
 
-Copy `env.example` to your real config file and adjust values for your environment.
+Copy the example environment file and edit it for your setup:
 
 ```bash
-cp env.example config/.env
+cp config/env.example config/.env
 ```
 
-Important configuration groups include:
+Important settings include:
 
 ### WhisperX
-- Hugging Face token
-- model name
-- batch size
-- compute type
-- device
-- optional speaker count hints
+- `HF_TOKEN`
+- `WHISPERX_MODEL`
+- `WHISPERX_BATCH_SIZE`
+- `WHISPERX_COMPUTE_TYPE`
+- `WHISPERX_DEVICE`
+- `WHISPERX_LANGUAGE`
 
 ### Chunking
-- target words per chunk
-- max words per chunk
+- `TRANSCRIPT_CHUNK_TARGET_WORDS`
+- `TRANSCRIPT_CHUNK_MAX_WORDS`
 
 ### Ollama
-- base URL
-- map model
-- reduce model
-- keep alive
-- temperature
-- separate context settings for map and reduce steps
+- `OLLAMA_URL`
+- `OLLAMA_MAP_MODEL`
+- `OLLAMA_REDUCE_MODEL`
+- `OLLAMA_KEEP_ALIVE`
+- `OLLAMA_TEMPERATURE`
+- `OLLAMA_MAP_NUM_CTX`
+- `OLLAMA_REDUCE_NUM_CTX`
 
-### Windows / control wrappers
-- source host IP
-- source username
-- SSH key path
-- start task name
-- stop script path
-- control log path
+### Output paths
+- `MEETING_SUMMARIES_ROOT`
 
-## Recommended Ollama Strategy
+### Optional remote control
+- `WINDOWS_HOST`
+- `WINDOWS_USER`
+- `WINDOWS_SSH_KEY`
+- `WINDOWS_START_TASK`
+- `WINDOWS_STOP_SCRIPT`
+- `MEETING_CONTROL_LOG`
 
-For long transcripts, a map/reduce setup works better than sending the full text in one prompt.
+## Systemd Automation
 
-Recommended pattern:
+Example `systemd` units are provided in the `systemd/` directory:
 
-- **Map step**: summarize each transcript chunk
-- **Reduce step**: combine chunk summaries into final markdown outputs
+- `meeting-capture.service.example`
+- `meeting-postprocess.service.example`
+- `meeting-postprocess.path.example`
 
-Example:
+Copy and adapt them for your machine:
 
-- `OLLAMA_MAP_MODEL=qwen2.5:32b`
-- `OLLAMA_REDUCE_MODEL=qwen2.5:32b`
-- `OLLAMA_MAP_NUM_CTX=16384`
-- `OLLAMA_REDUCE_NUM_CTX=32768`
+```bash
+sudo cp systemd/meeting-capture.service.example /etc/systemd/system/meeting-capture.service
+sudo cp systemd/meeting-postprocess.service.example /etc/systemd/system/meeting-postprocess.service
+sudo cp systemd/meeting-postprocess.path.example /etc/systemd/system/meeting-postprocess.path
+```
 
-This allows chunk summarization with a smaller working context while keeping the final synthesis step larger.
+Edit the copied units for your environment, including:
+
+- `User=`
+- `WorkingDirectory=`
+- `ExecStart=`
+- any host-specific paths
+
+Then reload systemd:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+## Typical Workflow
+
+### Manual testing
+A common testing path is:
+
+1. Start audio capture
+2. Stop audio capture
+3. Let the postprocess pipeline run automatically
+4. Inspect:
+   - transcript folder
+   - status/log files
+   - summary output folder
+
+### Production / unattended mode
+A typical unattended setup uses:
+
+- `meeting-capture.service`
+- `meeting-postprocess.path`
+- `meeting-postprocess.service`
+
+with external triggers from:
+- Home Assistant
+- wrapper scripts
+- webhook automation
 
 ## Home Assistant Integration
 
-The project can be controlled from Home Assistant using:
+Home Assistant is optional, but works well as a control layer.
 
-- `ha-start-meeting.sh`
-- `ha-stop-meeting.sh`
+Recommended pattern:
+- use `shell_command` to SSH into the processing host
+- call:
+  - `ha-start-meeting.sh`
+  - `ha-stop-meeting.sh`
+- expose those via two HA scripts or dashboard buttons
 
-These wrappers can be called from HA `shell_command` entries and exposed as dashboard buttons or scripts.
+Suggested controls:
+- **Start Meeting Capture**
+- **Stop Meeting Capture**
 
-## Notes on GPU Use
+## Notes on Ollama Usage
 
-If you are running multiple GPUs, it is a good idea to explicitly pin Ollama to the intended card. In testing, constraining Ollama to a single visible GPU improved stability and made runner behavior easier to reason about.
+The summarizer is designed around a map/reduce pattern:
+
+- **Map step:** summarize transcript chunks
+- **Reduce step:** combine chunk summaries into final outputs
+
+Recommended context split:
+- map/chunk summarization: smaller context
+- reduce/final synthesis: larger context
+
+Example:
+
+```env
+OLLAMA_MAP_NUM_CTX=16384
+OLLAMA_REDUCE_NUM_CTX=32768
+```
+
+If `ollama ps` shows the larger context after a run, that is usually expected because the reduce step was the last model state loaded.
 
 ## Known Limitations
 
 - Summary quality depends heavily on transcript quality
-- Random YouTube or podcast audio will not summarize like a formal meeting
-- Large Ollama models may occasionally need a clean reload or restart under VRAM pressure
-- Very long meetings may still require prompt and chunk-size tuning
+- Commentary videos/podcasts can still be summarized, but outputs may not resemble true meeting minutes
+- Large Ollama models may occasionally require a restart or retry under VRAM pressure
+- Remote audio capture and automation are environment-specific and may need local adaptation
 
-## Next Steps
+## Troubleshooting
 
-Once the core pipeline is working, potential useful additions include:
+See:
 
-- Home Assistant dashboard buttons / automation
+- `TROUBLESHOOTING.md`
+
+That file covers common issues including:
+
+- WhisperX installation/runtime problems
+- disk space problems
+- chunking behavior
+- Ollama GPU issues
+- Windows stop-script path issues
+
+## Suggested Next Steps
+
+Once the core pipeline is working, useful additions include:
+
+- home assistant buttons/automations
 - completion notifications
-- status sensors
-- publishing summaries to a CMS or website
-- additional cleanup / review tooling
+- processing status sensors
+- website publishing (for example via a CMS)
+- improved warm-up/retry behavior for Ollama
+- richer meeting metadata storage
+
+## Safety / Privacy Notes
+
+This project is intended for self-hosted use.
+
+Use:
+- `env.example`
+- `*.example` service files
+- sanitized docs
 
 ## License
 
