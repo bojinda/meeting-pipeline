@@ -1,0 +1,9 @@
+[Unit]
+Description=Run WhisperX on latest meeting recording
+
+[Service]
+Type=oneshot
+User=YOUR_USERNAME
+WorkingDirectory=/home/YOUR_USERNAME/meeting-pipeline
+ExecStart=/bin/bash -lc 'LATEST="$(cat /home/YOUR_USERNAME/meeting-pipeline/meeting-recordings/last_recording.txt)" && /home/bojinda/meeting-pipeline/bin/postprocess-meeting.sh "$LATEST"'
+TimeoutStartSec=infinity

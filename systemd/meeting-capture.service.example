@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=bojinda
-WorkingDirectory=/home/bojinda/meeting-pipeline
-ExecStart=/home/bojinda/meeting-pipeline/bin/record-meeting.sh
+User=YOUR_USERNAME
+WorkingDirectory=/home/YOUR_USERNAME/meeting-pipeline
+ExecStart=/home/YOUR_USERNAME/meeting-pipeline/bin/record-meeting.sh
 Restart=always
 RestartSec=2
 

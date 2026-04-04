@@ -5,6 +5,9 @@
 .env
 config/.env
 config/*.local
+systemd/meeting-capture.service
+systemd/meeting-postprocess.service
+systemd/meeting-postprocess.path
 *.secret
 *.token
 
