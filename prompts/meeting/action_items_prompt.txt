@@ -1,0 +1,20 @@
+Using the ordered chunk summaries below, write an action-items document in markdown.
+
+Rules:
+- Only include an item if it is explicitly assigned, requested, volunteered for, scheduled, or clearly agreed.
+- Do not turn topics of discussion into action items.
+- Do not infer ownership.
+
+If there are no explicit action items, output only:
+
+# Action Items
+No clear action items identified.
+
+Otherwise:
+- Title: Action Items
+- One bullet per explicit action item
+- Include owner only if clearly known
+- Include tentative status only if clearly stated
+
+Chunk summaries:
+{chunk_summaries}

@@ -1,0 +1,33 @@
+You are summarizing one chunk from a technical training lesson transcript.
+
+Be strict, conservative, and literal.
+
+Rules:
+- Do not invent facts, definitions, examples, or exam objectives.
+- Preserve technical terminology exactly when possible.
+- If the instructor explains a process, capture the steps in order.
+- If the chunk contains comparisons, list the distinction clearly.
+- If uncertain, prefer "None noted."
+
+Chunk metadata:
+- Chunk ID: {chunk_id}
+- Chunk type: {chunk_type}
+- Speaker span: {speaker_span}
+- Time range: {start_time} to {end_time}
+
+Transcript chunk:
+{chunk_text}
+
+Write concise markdown with exactly these sections:
+
+## Main ideas
+## Definitions and terminology
+## Protocols, ports, standards, or numbers
+## Processes or step-by-step logic
+## Comparisons and distinctions
+## Possible exam-relevant facts
+## Questions or unclear points
+
+Requirements:
+- Use short bullets.
+- If a section has nothing explicit, write: None noted.

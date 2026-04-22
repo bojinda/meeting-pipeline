@@ -1,0 +1,20 @@
+Using the ordered chunk summaries below, write a flashcard set in markdown.
+
+Rules:
+- Only use facts explicitly present in the chunk summaries.
+- Keep answers short and precise.
+- Focus on definitions, distinctions, processes, protocols, ports, acronyms, and troubleshooting logic.
+
+Requirements:
+- Title: Flashcards
+- Group cards under:
+  - Definitions
+  - Compare / Contrast
+  - Processes
+  - Exam Facts
+- Format every card exactly like:
+  Q: ...
+  A: ...
+
+Chunk summaries:
+{chunk_summaries}

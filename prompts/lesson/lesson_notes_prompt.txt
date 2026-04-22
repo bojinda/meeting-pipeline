@@ -1,0 +1,21 @@
+Using the ordered chunk summaries below, write lesson notes in markdown.
+
+Rules:
+- Be conservative and do not add outside knowledge.
+- Preserve the lesson's structure and chronology where useful.
+- Keep wording clear and study-friendly.
+- If chunk summaries contain uncertainty, preserve that uncertainty.
+
+Requirements:
+- Title: Lesson Notes
+- Sections:
+  - Overview
+  - Key Concepts
+  - Important Distinctions
+  - Processes / Logic
+  - Protocols, Ports, Standards, or Numbers
+  - Possible Exam-Relevant Facts
+  - Unclear Points
+
+Chunk summaries:
+{chunk_summaries}

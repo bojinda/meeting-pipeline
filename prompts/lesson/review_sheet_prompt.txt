@@ -1,0 +1,19 @@
+Using the ordered chunk summaries below, write a compact review sheet in markdown.
+
+Rules:
+- Only include explicit material from the chunk summaries.
+- Prioritize the highest-yield facts for review.
+- Keep it dense and skimmable.
+
+Requirements:
+- Title: Review Sheet
+- Sections:
+  - Must-Know Facts
+  - Acronyms and Terms
+  - Important Distinctions
+  - Processes to Remember
+  - Common Confusions
+  - If You Remember Only 5 Things
+
+Chunk summaries:
+{chunk_summaries}

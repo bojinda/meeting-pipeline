@@ -1,0 +1,15 @@
+Using the ordered chunk summaries below, write a study quiz in markdown.
+
+Rules:
+- Only ask about material explicitly covered in the chunk summaries.
+- Mix direct recall and applied understanding.
+- Do not invent scenario details beyond what is needed to ask the question.
+
+Requirements:
+- Title: Quiz
+- Include 10 to 15 numbered questions
+- Include a separate section:
+  ## Answer Key
+
+Chunk summaries:
+{chunk_summaries}
