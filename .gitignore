@@ -8,8 +8,6 @@ config/*.local
 systemd/meeting-capture.service
 systemd/meeting-postprocess.service
 systemd/meeting-postprocess.path
-systemd/watch-lesson-recordings.path
-systemd/postprocess-latest-lesson.service
 *.secret
 *.token
 
