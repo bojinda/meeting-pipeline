@@ -43,15 +43,13 @@ if [ -z "$LATEST_WAV" ]; then
   exit 1
 fi
 
-DEST_WAV="$LESSON_RECORDINGS_ROOT/$(basename "$LATEST_WAV")"
+STAMP="$(date +%F-%H%M%S)"
+DEST_WAV="$LESSON_RECORDINGS_ROOT/lesson-$STAMP.wav"
 
-if [ "$LATEST_WAV" != "$DEST_WAV" ]; then
-  cp -f "$LATEST_WAV" "$DEST_WAV"
-else
-  DEST_WAV="$LATEST_WAV"
-fi
+cp -f "$LATEST_WAV" "$DEST_WAV"
 
 printf '%s\n' "$DEST_WAV" > "$LESSON_RECORDINGS_ROOT/last_recording.txt"
 
-echo "[$(date -Is)] Lesson WAV selected: $DEST_WAV" >> "$LESSON_CONTROL_LOG"
+echo "[$(date -Is)] Source WAV: $LATEST_WAV" >> "$LESSON_CONTROL_LOG"
+echo "[$(date -Is)] Lesson WAV copied to: $DEST_WAV" >> "$LESSON_CONTROL_LOG"
 echo "[$(date -Is)] Updated $LESSON_RECORDINGS_ROOT/last_recording.txt" >> "$LESSON_CONTROL_LOG"
