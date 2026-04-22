@@ -6,6 +6,7 @@ Rules:
 - Keep it dense and skimmable.
 - Do not include course objective numbers, lesson roadmap items, or “this section will cover...” statements as review facts unless they are explained in substantive detail.
 - Only treat a fact as study content if it is explained, defined, compared, or used substantively in the lesson.
+- Output plain markdown only. Do not wrap the response in triple backticks or code fences.
 
 Requirements:
 - Title: Review Sheet

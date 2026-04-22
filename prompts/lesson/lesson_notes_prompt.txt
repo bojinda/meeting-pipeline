@@ -7,6 +7,7 @@ Rules:
 - If chunk summaries contain uncertainty, preserve that uncertainty.
 - Do not elevate course objective numbers, lesson roadmap items, or “this section will cover...” statements into key lesson content unless they are explained in substantive detail.
 - Only treat a fact as study content if it is explained, defined, compared, or used substantively in the lesson.
+- Output plain markdown only. Do not wrap the response in triple backticks or code fences.
 
 Requirements:
 - Title: Lesson Notes
