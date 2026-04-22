@@ -34,7 +34,27 @@ fi
 
 BASE="$(basename "$INPUT" .wav)"
 OUTDIR="$OUT_ROOT/$BASE"
+METADATA_SIDECAR="${INPUT%.wav}.metadata.json"
 mkdir -p "$OUTDIR" "$LOG_ROOT"
+if [ -f "$METADATA_SIDECAR" ]; then
+  python3 - "$METADATA_SIDECAR" "$OUTDIR/session-metadata.json" "$BASE.wav" "$BASE" <<'PY'
+import json
+import pathlib
+import sys
+
+src = pathlib.Path(sys.argv[1])
+dst = pathlib.Path(sys.argv[2])
+recording_file = sys.argv[3]
+session_name = sys.argv[4]
+
+data = json.loads(src.read_text(encoding="utf-8"))
+data["recording_file"] = recording_file
+data["transcript_dir"] = session_name
+data["summary_dir"] = session_name
+
+dst.write_text(json.dumps(data, indent=2), encoding="utf-8")
+PY
+fi
 
 LOGFILE="$OUTDIR/whisperx.log"
 STATUSFILE="$OUTDIR/status.txt"
@@ -105,6 +125,10 @@ if "${CMD[@]}" >"$LOGFILE" 2>&1; then
     if python "$BASE_DIR/bin/ollama_lesson_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
       echo "Summaries: yes" >> "$STATUSFILE"
       echo "Summary dir: $LOG_ROOT/$(basename "$OUTDIR")" >> "$STATUSFILE"
+      if [ -f "$OUTDIR/session-metadata.json" ]; then
+        mkdir -p "$LOG_ROOT/$BASE"
+        cp -f "$OUTDIR/session-metadata.json" "$LOG_ROOT/$BASE/session-metadata.json"
+      fi
     else
       echo "Summaries: failed" >> "$STATUSFILE"
     fi

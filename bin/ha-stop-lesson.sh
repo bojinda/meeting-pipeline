@@ -10,6 +10,9 @@ if [ -f "$CONFIG_FILE" ]; then
   set +a
 fi
 
+LESSON_STATE_DIR="${LESSON_STATE_DIR:-$BASE_DIR/lesson-state}"
+CURRENT_SESSION_JSON="$LESSON_STATE_DIR/current-session.json"
+
 : "${WINDOWS_HOST:?WINDOWS_HOST is required}"
 : "${WINDOWS_USER:?WINDOWS_USER is required}"
 : "${WINDOWS_SSH_KEY:?WINDOWS_SSH_KEY is required}"
@@ -43,10 +46,37 @@ if [ -z "$LATEST_WAV" ]; then
   exit 1
 fi
 
+SESSION_SLUG="$(python3 - "$CURRENT_SESSION_JSON" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+slug = ""
+
+if path.exists():
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        slug = (data.get("slug") or "").strip()
+    except Exception:
+        slug = ""
+
+print(slug)
+PY
+)"
+
+if [ -z "$SESSION_SLUG" ]; then
+  SESSION_SLUG="lesson"
+fi
+
 STAMP="$(date +%F-%H%M%S)"
-DEST_WAV="$LESSON_RECORDINGS_ROOT/lesson-$STAMP.wav"
+DEST_WAV="$LESSON_RECORDINGS_ROOT/${SESSION_SLUG}-${STAMP}.wav"
 
 cp -f "$LATEST_WAV" "$DEST_WAV"
+
+if [ -f "$CURRENT_SESSION_JSON" ]; then
+  cp -f "$CURRENT_SESSION_JSON" "${DEST_WAV%.wav}.metadata.json"
+fi
 
 printf '%s\n' "$DEST_WAV" > "$LESSON_RECORDINGS_ROOT/last_recording.txt"
 
