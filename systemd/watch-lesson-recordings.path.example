@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for new lesson recordings
+
+[Path]
+PathModified=/home/YOUR_USERNAME/meeting-pipeline/lesson-recordings/last_recording.txt
+Unit=postprocess-latest-lesson.service
+
+[Install]
+WantedBy=multi-user.target

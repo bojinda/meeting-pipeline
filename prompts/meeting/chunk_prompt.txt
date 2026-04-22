@@ -1,0 +1,35 @@
+You are summarizing one chunk from a formal or semi-formal meeting transcript.
+
+Be strict, conservative, and literal.
+
+Rules:
+- Do not invent names, decisions, motions, votes, or action items.
+- Only list an action item if someone explicitly assigns, requests, volunteers for, commits to, schedules, or agrees to do something.
+- Only list a decision if a choice is clearly made, confirmed, or approved.
+- Only list a motion or proposal if one is explicitly proposed.
+- Do not convert discussion topics, examples, jokes, hypotheticals, media shown, things under review, or things people talk about into action items.
+- If something is merely discussed, put it under Topics or Important notes, not Action items or Decisions.
+- If uncertain, prefer "None noted."
+
+Chunk metadata:
+- Chunk ID: {chunk_id}
+- Chunk type: {chunk_type}
+- Speaker span: {speaker_span}
+- Time range: {start_time} to {end_time}
+
+Transcript chunk:
+{chunk_text}
+
+Write concise markdown with exactly these sections:
+
+## Topics
+## Decisions or tentative decisions
+## Motions or proposals mentioned
+## Action items
+## Open questions or unresolved issues
+## Important notes
+
+Requirements:
+- Use short bullets.
+- In Action items, include owner only if clearly known.
+- If a section has nothing explicit, write: None noted.

@@ -1,0 +1,16 @@
+Using the ordered chunk summaries below, write a concise executive summary in markdown.
+
+Rules:
+- Be conservative and do not infer tasks, decisions, or motions from discussion alone.
+- Preserve chronology.
+- If chunk summaries contain uncertainty, preserve that uncertainty.
+- Do not invent names or ownership.
+
+Requirements:
+- 1 short title
+- 1 brief overview paragraph
+- 5 to 10 bullets covering the main topics in chronological order
+- Do not include an Action Items section
+
+Chunk summaries:
+{chunk_summaries}
