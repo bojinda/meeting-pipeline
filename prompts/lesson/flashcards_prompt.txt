@@ -4,6 +4,8 @@ Rules:
 - Only use facts explicitly present in the chunk summaries.
 - Keep answers short and precise.
 - Focus on definitions, distinctions, processes, protocols, ports, acronyms, and troubleshooting logic.
+- Do not create flashcards from course objective numbers, lesson roadmap items, or “this section will cover...” statements unless the user explicitly asks for exam-blueprint study aids.
+- Only treat a fact as study content if it is explained, defined, compared, or used substantively in the lesson.
 
 Requirements:
 - Title: Flashcards

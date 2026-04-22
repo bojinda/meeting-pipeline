@@ -8,6 +8,8 @@ Rules:
 - If the instructor explains a process, capture the steps in order.
 - If the chunk contains comparisons, list the distinction clearly.
 - If uncertain, prefer "None noted."
+- Do not treat course objective numbers, lesson roadmap items, or “this section will cover...” statements as core study content unless they are explained in substantive detail.
+- Only treat a fact as study content if it is explained, defined, compared, or used substantively in the lesson.
 
 Chunk metadata:
 - Chunk ID: {chunk_id}
