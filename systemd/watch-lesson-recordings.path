@@ -1,8 +1,0 @@
-[Unit]
-Description=Watch for new lesson recordings
-
-[Path]
-PathModified=/home/bojinda/meeting-pipeline/lesson-recordings/last_recording.txt
-
-[Install]
-WantedBy=multi-user.target
