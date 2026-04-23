@@ -9,8 +9,6 @@ fi
 INPUT="$1"
 BASE_DIR="$HOME/meeting-pipeline"
 CONFIG_FILE="$BASE_DIR/config/.env"
-OUT_ROOT="${LESSON_TRANSCRIPTS_ROOT:-$BASE_DIR/lesson-transcripts}"
-LOG_ROOT="${LESSON_SUMMARIES_ROOT:-$BASE_DIR/lesson-summaries}"
 
 if [[ ! -f "$INPUT" ]]; then
   echo "Input file not found: $INPUT" >&2
@@ -26,16 +24,22 @@ if [ -f "$CONFIG_FILE" ]; then
   set +a
 fi
 
+OUT_ROOT="${LESSON_TRANSCRIPTS_ROOT:-$BASE_DIR/lesson-transcripts}"
+LOG_ROOT="${LESSON_SUMMARIES_ROOT:-$BASE_DIR/lesson-summaries}"
+
 : "${WHISPERX_MODEL:=large-v2}"
 : "${WHISPERX_BATCH_SIZE:=4}"
 : "${WHISPERX_COMPUTE_TYPE:=float16}"
 : "${WHISPERX_DEVICE:=cuda}"
 : "${WHISPERX_LANGUAGE:=en}"
+: "${HF_TOKEN:?HF_TOKEN is required}"
 
 BASE="$(basename "$INPUT" .wav)"
 OUTDIR="$OUT_ROOT/$BASE"
 METADATA_SIDECAR="${INPUT%.wav}.metadata.json"
+
 mkdir -p "$OUTDIR" "$LOG_ROOT"
+
 if [ -f "$METADATA_SIDECAR" ]; then
   python3 - "$METADATA_SIDECAR" "$OUTDIR/session-metadata.json" "$BASE.wav" "$BASE" <<'PY'
 import json
@@ -109,39 +113,40 @@ if "${CMD[@]}" >"$LOGFILE" 2>&1; then
   } >> "$STATUSFILE"
 
   LATEST_JSON="$(ls -t "$OUTDIR"/*.json 2>/dev/null | head -n 1)"
+  CHUNKS_JSONL="$OUTDIR/chunks_out/transcript_chunks.jsonl"
+
   if [ -n "$LATEST_JSON" ]; then
     if python "$BASE_DIR/bin/transcript_chunker.py" "$LATEST_JSON" \
         --target-words "${TRANSCRIPT_CHUNK_TARGET_WORDS:-1400}" \
         --max-words "${TRANSCRIPT_CHUNK_MAX_WORDS:-2200}" >> "$LOGFILE" 2>&1; then
-      echo "Chunking: yes" >> "$STATUSFILE"
+
+      if [ ! -f "$CHUNKS_JSONL" ] || [ ! -s "$CHUNKS_JSONL" ]; then
+        echo "Chunking: no speech detected" >> "$STATUSFILE"
+        echo "Summaries: skipped (no chunks)" >> "$STATUSFILE"
+        exit 0
+      else
+        echo "Chunking: yes" >> "$STATUSFILE"
+      fi
+
     else
       echo "Chunking: failed" >> "$STATUSFILE"
+      exit 1
     fi
   else
     echo "Chunking: no JSON found" >> "$STATUSFILE"
-  fi
-  
-  CHUNKS_JSONL="$OUTDIR/chunks_out/transcript_chunks.jsonl"
-
-  if [ ! -f "$CHUNKS_JSONL" ] || [ ! -s "$CHUNKS_JSONL" ]; then
-    echo "Chunking: no speech detected" >> "$STATUSFILE"
-    echo "Summaries: skipped (no chunks)" >> "$STATUSFILE"
-    exit 0
+    exit 1
   fi
 
-  if [ -f "$OUTDIR/chunks_out/transcript_chunks.jsonl" ]; then
-    if python "$BASE_DIR/bin/ollama_lesson_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
-      echo "Summaries: yes" >> "$STATUSFILE"
-      echo "Summary dir: $LOG_ROOT/$(basename "$OUTDIR")" >> "$STATUSFILE"
-      if [ -f "$OUTDIR/session-metadata.json" ]; then
-        mkdir -p "$LOG_ROOT/$BASE"
-        cp -f "$OUTDIR/session-metadata.json" "$LOG_ROOT/$BASE/session-metadata.json"
-      fi
-    else
-      echo "Summaries: failed" >> "$STATUSFILE"
+  if python "$BASE_DIR/bin/ollama_lesson_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
+    echo "Summaries: yes" >> "$STATUSFILE"
+    echo "Summary dir: $LOG_ROOT/$(basename "$OUTDIR")" >> "$STATUSFILE"
+    if [ -f "$OUTDIR/session-metadata.json" ]; then
+      mkdir -p "$LOG_ROOT/$BASE"
+      cp -f "$OUTDIR/session-metadata.json" "$LOG_ROOT/$BASE/session-metadata.json"
     fi
   else
-    echo "Summaries: no chunks found" >> "$STATUSFILE"
+    echo "Summaries: failed" >> "$STATUSFILE"
+    exit 1
   fi
 
 else
