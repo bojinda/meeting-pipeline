@@ -132,6 +132,7 @@ stopLessonBtn.addEventListener("click", async () => {
 
 document.addEventListener("DOMContentLoaded", async () => {
   try {
+    await sendMessage({ type: "refreshBadge" });
     await loadCurrentTab();
 
     try {

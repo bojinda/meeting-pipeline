@@ -29,6 +29,42 @@ function normalizeBaseUrl(url) {
   return url.replace(/\/+$/, "");
 }
 
+function isSessionActive(session) {
+  if (!session) return false;
+  return ["starting", "recording", "stopping"].includes(session.state);
+}
+
+async function updateBadge(session = null) {
+  if (!session || !isSessionActive(session)) {
+    await chrome.action.setBadgeText({ text: "" });
+    await chrome.action.setTitle({
+      title: "Lesson Controller"
+    });
+    return;
+  }
+
+  if (session.state === "stopping") {
+    await chrome.action.setBadgeBackgroundColor({ color: "#d97706" });
+    await chrome.action.setBadgeText({ text: "..." });
+  } else {
+    await chrome.action.setBadgeBackgroundColor({ color: "#b91c1c" });
+    await chrome.action.setBadgeText({ text: "REC" });
+  }
+
+  const label = session.user_label || session.title || "Lesson active";
+  await chrome.action.setTitle({
+    title: `Lesson Controller — ${session.state}: ${label}`
+  });
+}
+
+async function persistSession(session) {
+  await saveStoredValues({
+    [STORAGE_KEYS.currentSessionId]: session?.session_id || null,
+    [STORAGE_KEYS.currentSession]: session || null
+  });
+  await updateBadge(session || null);
+}
+
 async function callController({ baseUrl, apiKey, path, method = "GET", body = null }) {
   if (!baseUrl) {
     throw new Error("Controller URL is not configured.");
@@ -75,11 +111,7 @@ async function lessonStart(payload) {
   });
 
   const session = data?.session || null;
-  await saveStoredValues({
-    [STORAGE_KEYS.currentSessionId]: session?.session_id || null,
-    [STORAGE_KEYS.currentSession]: session
-  });
-
+  await persistSession(session);
   return data;
 }
 
@@ -97,11 +129,7 @@ async function lessonStop() {
   });
 
   const session = data?.session || null;
-  await saveStoredValues({
-    [STORAGE_KEYS.currentSessionId]: session?.session_id || null,
-    [STORAGE_KEYS.currentSession]: session
-  });
-
+  await persistSession(session);
   return data;
 }
 
@@ -116,13 +144,41 @@ async function getCurrentLesson() {
   });
 
   const session = data?.session || null;
-  await saveStoredValues({
-    [STORAGE_KEYS.currentSessionId]: session?.session_id || null,
-    [STORAGE_KEYS.currentSession]: session
-  });
-
+  await persistSession(session);
   return data;
 }
+
+async function refreshBadgeFromController() {
+  try {
+    const config = await getStoredConfig();
+
+    if (!config.controllerUrl || !config.apiKey) {
+      await updateBadge(null);
+      return;
+    }
+
+    const data = await callController({
+      baseUrl: config.controllerUrl,
+      apiKey: config.apiKey,
+      path: "/api/v1/lessons/current",
+      method: "GET"
+    });
+
+    const session = data?.session || null;
+    await persistSession(session);
+  } catch {
+    const config = await getStoredConfig();
+    await updateBadge(config.currentSession || null);
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  refreshBadgeFromController();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  refreshBadgeFromController();
+});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
@@ -132,6 +188,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           [STORAGE_KEYS.controllerUrl]: (message.controllerUrl || "").trim(),
           [STORAGE_KEYS.apiKey]: (message.apiKey || "").trim()
         });
+        await refreshBadgeFromController();
         sendResponse({ ok: true });
         return;
       }
@@ -162,6 +219,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.type === "getStoredConfig") {
         const config = await getStoredConfig();
         sendResponse({ ok: true, data: config });
+        return;
+      }
+
+      if (message.type === "refreshBadge") {
+        await refreshBadgeFromController();
+        sendResponse({ ok: true });
         return;
       }
 
