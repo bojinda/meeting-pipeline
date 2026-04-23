@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Lesson Controller</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>Lesson Controller</h1>
+
+      <section class="card">
+        <h2>Current Tab</h2>
+        <div class="row">
+          <label>Title</label>
+          <div id="tabTitle" class="readonly">Loading...</div>
+        </div>
+        <div class="row">
+          <label>URL</label>
+          <div id="tabUrl" class="readonly">Loading...</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Controller</h2>
+        <div class="row">
+          <label for="controllerUrl">Controller URL</label>
+          <input id="controllerUrl" type="text" placeholder="http://192.168.0.105:8765" />
+        </div>
+        <div class="row">
+          <label for="apiKey">API Key</label>
+          <input id="apiKey" type="password" placeholder="Enter API key" />
+        </div>
+        <div class="row">
+          <label for="userLabel">Optional Label</label>
+          <input id="userLabel" type="text" placeholder="e.g. VS Code basics" />
+        </div>
+        <div class="actions">
+          <button id="saveSettings">Save Settings</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Lesson Session</h2>
+        <div id="sessionInfo" class="readonly">No session loaded.</div>
+        <div class="actions">
+          <button id="refreshSession">Refresh</button>
+          <button id="startLesson">Start Lesson</button>
+          <button id="stopLesson">Stop Lesson</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Status</h2>
+        <pre id="statusBox">Ready.</pre>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
