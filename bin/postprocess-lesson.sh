@@ -120,6 +120,14 @@ if "${CMD[@]}" >"$LOGFILE" 2>&1; then
   else
     echo "Chunking: no JSON found" >> "$STATUSFILE"
   fi
+  
+  CHUNKS_JSONL="$OUTDIR/chunks_out/transcript_chunks.jsonl"
+
+  if [ ! -f "$CHUNKS_JSONL" ] || [ ! -s "$CHUNKS_JSONL" ]; then
+    echo "Chunking: no speech detected" >> "$STATUSFILE"
+    echo "Summaries: skipped (no chunks)" >> "$STATUSFILE"
+    exit 0
+  fi
 
   if [ -f "$OUTDIR/chunks_out/transcript_chunks.jsonl" ]; then
     if python "$BASE_DIR/bin/ollama_lesson_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
