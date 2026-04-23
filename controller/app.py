@@ -12,7 +12,7 @@ from .models import (
     StopLessonRequest,
 )
 from .registry import build_default_registry
-from .session_store import load_current_session, save_session
+from .session_store import load_current_session, save_session, sync_session_artifacts
 from .utils import build_session_id, slugify, utc_now
 
 app = FastAPI(title="Meeting Pipeline Controller", version="1.0.0")
@@ -138,6 +138,7 @@ def stop_lesson(payload: StopLessonRequest) -> LessonActionResponse:
 
     session.state = "stopped"
     save_session(session)
+    sync_session_artifacts(session)
     return LessonActionResponse(session=session, action=result)
 
 
