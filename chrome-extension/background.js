@@ -118,19 +118,36 @@ async function lessonStart(payload) {
 async function lessonStop() {
   const config = await getStoredConfig();
 
-  const data = await callController({
-    baseUrl: config.controllerUrl,
-    apiKey: config.apiKey,
-    path: "/api/v1/lessons/stop",
-    method: "POST",
-    body: config.currentSessionId
-      ? { session_id: config.currentSessionId }
-      : {}
-  });
+  const currentSession = config.currentSession || null;
 
-  const session = data?.session || null;
-  await persistSession(session);
-  return data;
+  if (currentSession) {
+    const optimisticStoppingSession = {
+      ...currentSession,
+      state: "stopping"
+    };
+    await persistSession(optimisticStoppingSession);
+  } else {
+    await updateBadge({ state: "stopping", title: "Stopping lesson..." });
+  }
+
+  try {
+    const data = await callController({
+      baseUrl: config.controllerUrl,
+      apiKey: config.apiKey,
+      path: "/api/v1/lessons/stop",
+      method: "POST",
+      body: config.currentSessionId
+        ? { session_id: config.currentSessionId }
+        : {}
+    });
+
+    const session = data?.session || null;
+    await persistSession(session);
+    return data;
+  } catch (error) {
+    await persistSession(currentSession);
+    throw error;
+  }
 }
 
 async function getCurrentLesson() {

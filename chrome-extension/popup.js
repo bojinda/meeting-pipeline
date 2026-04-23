@@ -19,9 +19,19 @@ function setStatus(message, extra = null) {
   statusBoxEl.textContent = parts.join("\n\n");
 }
 
+function updateButtonStates(session) {
+  const state = session?.state || null;
+  const isActive = ["starting", "recording", "stopping"].includes(state);
+  const isStopping = state === "stopping";
+
+  startLessonBtn.disabled = isActive;
+  stopLessonBtn.disabled = !isActive || isStopping;
+}
+
 function renderSession(session) {
   if (!session) {
     sessionInfoEl.textContent = "No session loaded.";
+    updateButtonStates(null);
     return;
   }
 
@@ -33,6 +43,8 @@ function renderSession(session) {
     `Started: ${session.started_at || "(none)"}`,
     `Stopped: ${session.stopped_at || "(not stopped yet)"}`
   ].join("\n");
+
+  updateButtonStates(session);
 }
 
 function sendMessage(message) {
@@ -120,13 +132,33 @@ startLessonBtn.addEventListener("click", async () => {
 
 stopLessonBtn.addEventListener("click", async () => {
   try {
-    await ensureConfigured();
+    const config = await ensureConfigured();
+
+    let optimisticSession = null;
+    try {
+      const stored = await sendMessage({ type: "getStoredConfig" });
+      if (stored.currentSession) {
+        optimisticSession = {
+          ...stored.currentSession,
+          state: "stopping"
+        };
+        renderSession(optimisticSession);
+      }
+    } catch {
+      // ignore optimistic render failure
+    }
+
     setStatus("Stopping lesson...");
     const data = await sendMessage({ type: "lessonStop" });
     renderSession(data.session || null);
     setStatus("Lesson stopped.", data.session || null);
   } catch (error) {
     setStatus("Failed to stop lesson.", error.message);
+    try {
+      await refreshCurrentSession();
+    } catch {
+      // ignore secondary refresh failure
+    }
   }
 });
 
