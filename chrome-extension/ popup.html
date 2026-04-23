@@ -22,28 +22,16 @@
       </section>
 
       <section class="card">
-        <h2>Controller</h2>
-        <div class="row">
-          <label for="controllerUrl">Controller URL</label>
-          <input id="controllerUrl" type="text" placeholder="http://192.168.0.105:8765" />
-        </div>
-        <div class="row">
-          <label for="apiKey">API Key</label>
-          <input id="apiKey" type="password" placeholder="Enter API key" />
-        </div>
+        <h2>Lesson Session</h2>
         <div class="row">
           <label for="userLabel">Optional Label</label>
           <input id="userLabel" type="text" placeholder="e.g. VS Code basics" />
         </div>
-        <div class="actions">
-          <button id="saveSettings">Save Settings</button>
-        </div>
-      </section>
 
-      <section class="card">
-        <h2>Lesson Session</h2>
         <div id="sessionInfo" class="readonly">No session loaded.</div>
-        <div class="actions">
+
+        <div class="actions" style="margin-top: 10px;">
+          <button id="openOptions">Settings</button>
           <button id="refreshSession">Refresh</button>
           <button id="startLesson">Start Lesson</button>
           <button id="stopLesson">Stop Lesson</button>

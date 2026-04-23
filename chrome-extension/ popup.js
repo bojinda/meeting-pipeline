@@ -1,12 +1,10 @@
 const tabTitleEl = document.getElementById("tabTitle");
 const tabUrlEl = document.getElementById("tabUrl");
-const controllerUrlEl = document.getElementById("controllerUrl");
-const apiKeyEl = document.getElementById("apiKey");
 const userLabelEl = document.getElementById("userLabel");
 const sessionInfoEl = document.getElementById("sessionInfo");
 const statusBoxEl = document.getElementById("statusBox");
 
-const saveSettingsBtn = document.getElementById("saveSettings");
+const openOptionsBtn = document.getElementById("openOptions");
 const refreshSessionBtn = document.getElementById("refreshSession");
 const startLessonBtn = document.getElementById("startLesson");
 const stopLessonBtn = document.getElementById("stopLesson");
@@ -66,31 +64,26 @@ async function loadCurrentTab() {
   tabUrlEl.textContent = currentTab?.url || "(no URL)";
 }
 
-async function loadStoredConfig() {
+async function ensureConfigured() {
   const config = await sendMessage({ type: "getStoredConfig" });
-  controllerUrlEl.value = config.controllerUrl || "http://192.168.0.105:8765";
-  apiKeyEl.value = config.apiKey || "";
-  renderSession(config.currentSession || null);
+
+  if (!config.controllerUrl || !config.apiKey) {
+    throw new Error("Controller settings are missing. Click Settings and configure the controller URL and API key.");
+  }
+
+  return config;
 }
 
 async function refreshCurrentSession() {
+  await ensureConfigured();
   setStatus("Refreshing current lesson session...");
   const data = await sendMessage({ type: "getCurrentLesson" });
   renderSession(data.session || null);
   setStatus("Current session refreshed.", data.session || null);
 }
 
-saveSettingsBtn.addEventListener("click", async () => {
-  try {
-    await sendMessage({
-      type: "saveSettings",
-      controllerUrl: controllerUrlEl.value,
-      apiKey: apiKeyEl.value
-    });
-    setStatus("Settings saved.");
-  } catch (error) {
-    setStatus("Failed to save settings.", error.message);
-  }
+openOptionsBtn.addEventListener("click", () => {
+  chrome.runtime.openOptionsPage();
 });
 
 refreshSessionBtn.addEventListener("click", async () => {
@@ -103,6 +96,8 @@ refreshSessionBtn.addEventListener("click", async () => {
 
 startLessonBtn.addEventListener("click", async () => {
   try {
+    await ensureConfigured();
+
     if (!currentTab?.url) {
       throw new Error("No active tab URL available.");
     }
@@ -125,6 +120,7 @@ startLessonBtn.addEventListener("click", async () => {
 
 stopLessonBtn.addEventListener("click", async () => {
   try {
+    await ensureConfigured();
     setStatus("Stopping lesson...");
     const data = await sendMessage({ type: "lessonStop" });
     renderSession(data.session || null);
@@ -137,8 +133,13 @@ stopLessonBtn.addEventListener("click", async () => {
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     await loadCurrentTab();
-    await loadStoredConfig();
-    setStatus("Ready.");
+
+    try {
+      await refreshCurrentSession();
+    } catch {
+      renderSession(null);
+      setStatus("Ready. Configure settings if needed.");
+    }
   } catch (error) {
     setStatus("Initialization failed.", error.message);
   }

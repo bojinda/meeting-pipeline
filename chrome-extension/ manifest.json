@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lesson Controller",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Start and stop lesson capture from the active browser tab.",
   "action": {
     "default_title": "Lesson Controller",
@@ -10,6 +10,7 @@
   "background": {
     "service_worker": "background.js"
   },
+  "options_page": "options.html",
   "permissions": [
     "storage",
     "tabs",
