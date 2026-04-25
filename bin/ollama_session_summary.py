@@ -252,6 +252,13 @@ def main(default_profile: str | None = None) -> int:
     print(f"[info] prompt_dir={prompt_dir}", flush=True)
     print(f"[info] summaries_dir={summaries_dir}", flush=True)
     print(f"[info] chunk_count={len(chunks)}", flush=True)
+    print(f"[info] ollama_url={args.ollama_url}", flush=True)
+    print(f"[info] map_model={args.map_model}", flush=True)
+    print(f"[info] reduce_model={args.reduce_model}", flush=True)
+    print(f"[info] keep_alive={args.keep_alive}", flush=True)
+    print(f"[info] temperature={args.temperature}", flush=True)
+    print(f"[info] map_num_ctx={args.map_num_ctx}", flush=True)
+    print(f"[info] reduce_num_ctx={args.reduce_num_ctx}", flush=True)
 
     chunk_summaries: list[dict[str, Any]] = []
 
