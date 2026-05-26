@@ -10,6 +10,7 @@ Rules:
 - Do not convert discussion topics, examples, jokes, hypotheticals, media shown, things under review, or things people talk about into action items.
 - If something is merely discussed, put it under Topics or Important notes, not Action items or Decisions.
 - If uncertain, prefer "None noted."
+- A motion should only be listed as a motion if it is formally placed before the meeting, clearly recognized by the chair/presiding officer, and either seconded, debated, voted on, carried, defeated, withdrawn, or tabled. Do not treat joking language, sarcastic remarks, hypothetical wording, or casual phrases like “I’ll put in a motion...” as a motion unless the meeting clearly proceeds with it as formal business.
 
 Chunk metadata:
 - Chunk ID: {chunk_id}
