@@ -21,6 +21,7 @@ fi
 : "${WHISPERX_COMPUTE_TYPE:=float16}"
 : "${WHISPERX_DEVICE:=cuda}"
 : "${WHISPERX_LANGUAGE:=en}"
+: "${DELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION:=0}"
 
 BASE="$(basename "$INPUT" .wav)"
 OUTDIR="$OUT_ROOT/$BASE"
@@ -37,6 +38,7 @@ STATUSFILE="$OUTDIR/status.txt"
   echo "Batch size: $WHISPERX_BATCH_SIZE"
   echo "Compute type: $WHISPERX_COMPUTE_TYPE"
   echo "Device: $WHISPERX_DEVICE"
+  echo "Delete source audio after transcription: $DELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION"
 } > "$STATUSFILE"
 
 CMD=(
@@ -77,6 +79,21 @@ if "${CMD[@]}" >"$LOGFILE" 2>&1; then
     echo "Completed: $(date -Is)"
     echo "Success: yes"
   } >> "$STATUSFILE"
+
+  if [ "$DELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION" = "1" ]; then
+    if ls "$OUTDIR"/*.json >/dev/null 2>&1; then
+      if [ -f "$INPUT" ]; then
+        rm -f -- "$INPUT"
+        echo "Source audio deleted after transcription: yes" >> "$STATUSFILE"
+      else
+        echo "Source audio deleted after transcription: source already missing" >> "$STATUSFILE"
+      fi
+    else
+      echo "Source audio deleted after transcription: skipped (no transcript JSON found)" >> "$STATUSFILE"
+    fi
+  else
+    echo "Source audio deleted after transcription: no" >> "$STATUSFILE"
+  fi
 
   LATEST_JSON="$(ls -t "$OUTDIR"/*.json 2>/dev/null | head -n 1)"
   if [ -n "$LATEST_JSON" ]; then
