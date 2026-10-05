@@ -5,6 +5,7 @@ Rules:
 - Preserve chronology.
 - If chunk summaries contain uncertainty, preserve that uncertainty.
 - Do not invent names or ownership.
+- Respect Meeting section metadata: omit pre-meeting chatter and clearly label any previous-meeting recap as historical context, not current decisions.
 
 Requirements:
 - 1 short title

@@ -9,6 +9,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from meeting_postprocess.aliases import load_aliases
+from meeting_postprocess.normalization import prepare_text
+from meeting_postprocess.qa import check_minutes, write_report
+from meeting_postprocess.rendering import insert_recap
+from meeting_postprocess.sections import ADJOURNMENT, BUSINESS, RECAP, prepare_chunks
+
 
 def call_ollama(
     ollama_url: str,
@@ -73,17 +79,19 @@ def build_chunk_prompt(prompt_dir: Path, chunk: dict) -> str:
         speaker_span=chunk.get("speaker_span", ""),
         start_time=chunk.get("start_time", ""),
         end_time=chunk.get("end_time", ""),
+        meeting_section=chunk.get("meeting_section", ""),
         chunk_text=chunk.get("text", ""),
     )
 
 def build_reduce_input(chunk_summaries: list[dict]) -> str:
     parts: list[str] = []
     for item in chunk_summaries:
+        section = f"\n- Meeting section: {item['meeting_section']}" if "meeting_section" in item else ""
         parts.append(
             f"""# Chunk {item["chunk_id"]}
 - File: {item["file_name"]}
 - Time range: {item["start_time"]} to {item["end_time"]}
-- Speaker span: {item["speaker_span"]}
+- Speaker span: {item["speaker_span"]}{section}
 
 {item["summary"]}"""
         )
@@ -192,6 +200,15 @@ def main(default_profile: str | None = None) -> int:
         else None,
         help="Context window for reduce-stage final documents.",
     )
+    parser.add_argument(
+        "--speaker-aliases", type=Path,
+        help="Meeting speaker mapping JSON (default: <transcript_dir>/speaker_aliases.json).",
+    )
+    parser.add_argument(
+        "--keep-recap", action=argparse.BooleanOptionalAction,
+        default=os.environ.get("MEETING_KEEP_RECAP", "0").lower() in {"1", "true", "yes"},
+        help="Include a separately labelled Recap of Previous Meeting in draft minutes.",
+    )
 
     args = parser.parse_args()
 
@@ -235,6 +252,22 @@ def main(default_profile: str | None = None) -> int:
         print(f"ERROR: No chunks found in {chunks_jsonl}", file=sys.stderr)
         return 2
 
+    aliases: dict[str, str] = {}
+    if profile == "meeting":
+        try:
+            aliases = load_aliases(transcript_dir, args.speaker_aliases)
+            chunks = prepare_chunks(chunks, aliases)
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"ERROR: Meeting preparation failed: {exc}", file=sys.stderr)
+            return 2
+        if not chunks:
+            print("ERROR: No meeting text found in transcript chunks", file=sys.stderr)
+            return 2
+        if args.keep_recap and any(chunk["meeting_section"] == RECAP for chunk in chunks):
+            if not (prompt_dir / "recap_prompt.txt").exists():
+                print(f"ERROR: Missing reduce prompt: {prompt_dir / 'recap_prompt.txt'}", file=sys.stderr)
+                return 2
+
     summary_root = Path(
         os.environ.get(
             profile_cfg["summary_root_env"],
@@ -244,6 +277,14 @@ def main(default_profile: str | None = None) -> int:
 
     summaries_dir = resolve_summary_dir(transcript_dir, summary_root)
     summaries_dir.mkdir(parents=True, exist_ok=True)
+
+    if profile == "meeting":
+        # Keep the original transcript/chunk index intact and save evidence for
+        # every classified run, including sections excluded from draft minutes.
+        (summaries_dir / "meeting_sections.jsonl").write_text(
+            "".join(json.dumps(chunk, ensure_ascii=False) + "\n" for chunk in chunks),
+            encoding="utf-8",
+        )
 
     chunk_summaries_path = summaries_dir / "chunk_summaries.jsonl"
 
@@ -259,6 +300,9 @@ def main(default_profile: str | None = None) -> int:
     print(f"[info] temperature={args.temperature}", flush=True)
     print(f"[info] map_num_ctx={args.map_num_ctx}", flush=True)
     print(f"[info] reduce_num_ctx={args.reduce_num_ctx}", flush=True)
+    if profile == "meeting":
+        print(f"[info] speaker_alias_count={len(aliases)}", flush=True)
+        print(f"[info] keep_recap={args.keep_recap}", flush=True)
 
     chunk_summaries: list[dict[str, Any]] = []
 
@@ -282,6 +326,9 @@ def main(default_profile: str | None = None) -> int:
             print(f"ERROR: Ollama map-stage failed for {chunk_id}: {exc}", file=sys.stderr)
             return 1
 
+        if profile == "meeting":
+            summary_text = prepare_text(summary_text, aliases)
+
         row = {
             "chunk_id": chunk_id,
             "file_name": chunk.get("file_name", transcript_dir.name),
@@ -291,6 +338,9 @@ def main(default_profile: str | None = None) -> int:
             "chunk_type": chunk.get("chunk_type", ""),
             "summary": summary_text,
         }
+        if profile == "meeting":
+            for key in ("source_chunk_id", "meeting_section", "section_evidence"):
+                row[key] = chunk[key]
         chunk_summaries.append(row)
 
     with chunk_summaries_path.open("w", encoding="utf-8") as f:
@@ -300,6 +350,15 @@ def main(default_profile: str | None = None) -> int:
     print(f"[info] wrote {chunk_summaries_path}", flush=True)
 
     combined = build_reduce_input(chunk_summaries)
+    minutes_combined = combined
+    recap_combined = ""
+    if profile == "meeting":
+        minutes_combined = build_reduce_input([
+            row for row in chunk_summaries if row["meeting_section"] in {BUSINESS, ADJOURNMENT}
+        ]) or "No explicit current meeting business or adjournment was identified."
+        recap_combined = build_reduce_input([
+            row for row in chunk_summaries if row["meeting_section"] == RECAP
+        ])
 
     for output_filename, template_name in profile_cfg["outputs"]:
         template_path = prompt_dir / template_name
@@ -308,7 +367,10 @@ def main(default_profile: str | None = None) -> int:
             return 2
 
         print(f"[reduce] generating {output_filename}", flush=True)
-        reduce_prompt = build_reduce_prompt(prompt_dir, template_name, combined)
+        reduce_prompt = build_reduce_prompt(
+            prompt_dir, template_name,
+            minutes_combined if output_filename == "minutes-draft.md" else combined,
+        )
 
         try:
             content = call_ollama(
@@ -320,6 +382,17 @@ def main(default_profile: str | None = None) -> int:
                 temperature=args.temperature,
                 num_ctx=args.reduce_num_ctx,
             )
+            if profile == "meeting" and output_filename == "minutes-draft.md" and args.keep_recap and recap_combined:
+                recap = call_ollama(
+                    ollama_url=args.ollama_url,
+                    model=args.reduce_model,
+                    prompt=build_reduce_prompt(prompt_dir, "recap_prompt.txt", recap_combined),
+                    system=reduce_system,
+                    keep_alive=args.keep_alive,
+                    temperature=args.temperature,
+                    num_ctx=args.reduce_num_ctx,
+                )
+                content = insert_recap(content, recap)
         except Exception as exc:
             print(
                 f"ERROR: Ollama reduce-stage failed for {output_filename}: {exc}",
@@ -327,9 +400,16 @@ def main(default_profile: str | None = None) -> int:
             )
             return 1
 
+        if profile == "meeting":
+            content = prepare_text(content, aliases)
         out_path = summaries_dir / output_filename
         out_path.write_text(content.rstrip() + "\n", encoding="utf-8")
         print(f"[info] wrote {out_path}", flush=True)
+        if profile == "meeting" and output_filename == "minutes-draft.md":
+            source = "\n".join(chunk["text"] for chunk in chunks)
+            findings = check_minutes(content, source=source)
+            write_report(summaries_dir, findings)
+            print(f"[qa] {len(findings)} finding(s); see {summaries_dir / 'minutes-qa.md'}", flush=True)
 
     print("[done] summary generation complete", flush=True)
     return 0

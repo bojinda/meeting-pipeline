@@ -374,6 +374,93 @@ If `ollama ps` shows the larger context after a run, that is usually expected be
 
 ---
 
+## Meeting Minutes Post-processing
+
+Meeting mode applies speaker aliases and known text repairs before map-stage
+summarization, and again to generated text. Raw transcripts and chunk indexes
+are preserved. Lesson mode continues to use its existing flow. These helpers
+use the Python standard library and require no additional packages.
+
+### Speaker names
+
+Place `speaker_aliases.json` in the individual meeting's transcript directory,
+alongside `chunks_out/`. Use only identities you have verified:
+
+```json
+{
+  "SPEAKER_00": "Alex Morgan",
+  "SPEAKER_01": "Sam Chen"
+}
+```
+
+See `config/speaker_aliases.example.json` for a sample. The file is optional;
+unmapped labels remain available for review. Invalid mappings stop generation
+before any Ollama calls. After updating names, rerun the summarizer:
+
+```bash
+python bin/ollama_meeting_summary.py meeting-transcripts/session-123
+```
+
+To select another mapping file, pass `--speaker-aliases /path/to/names.json`.
+The mapping is a flat JSON object with plain, single-line names.
+
+### Normalization and meeting sections
+
+Known repairs include `Mack Yard`, `Mackyard`, and `Mac yard` → `Mac Yard`,
+`Transport Canadaâ€™s` → `Transport Canada’s`, and `hypodermical` → `hypodermic`.
+Encoding repairs target known sequences and preserve correctly encoded accents.
+
+A stateful rule classifier labels transcript portions as `pre_meeting_chatter`,
+`previous_meeting_recap`, `current_meeting_business`, or `adjournment`. It can
+split a source chunk at section boundaries while retaining all text for the
+map stage. Explicit greetings/setup cues mark opening chatter, historical recap
+cues mark previous business, and an actual adjournment statement marks the close.
+A motion to adjourn by itself remains current business. Approval of previous
+minutes also remains current business. Ambiguous material is retained as current
+business; historical continuations require past-tense cues after a recap begins.
+
+Review `meeting_sections.jsonl` in the meeting's summary directory for the
+normalized text, source chunk ID, section label, and classification evidence.
+Time ranges refer to the containing source chunk, not precise section boundaries.
+The classifier is heuristic: implicit transitions and mixed historical/current
+statements still need human review.
+
+Draft minutes use current-business and adjournment summaries. To include the
+historical recap, pass:
+
+```bash
+python bin/ollama_meeting_summary.py meeting-transcripts/session-123 --keep-recap
+```
+
+This summarizes recap portions separately and inserts them under the exact heading
+**Recap of Previous Meeting**. Previous decisions and assignments stay in that
+section. No recap section is added if none was identified. For unattended runs,
+set `MEETING_KEEP_RECAP=1` in `config/.env`; `--no-keep-recap` overrides it.
+An additional reduce call is made only when an identified recap is included.
+The existing conservative rules for motions, decisions, and action items remain.
+
+### Final QA
+
+Each successful meeting run writes `minutes-qa.md` and `minutes-qa.json` beside
+`minutes-draft.md`. QA flags unresolved speaker labels, malformed Markdown list
+markers, remaining mojibake, inconsistent Mac Yard spelling, and questionable
+mover/seconder attributions. Findings identify final-document line numbers.
+Motion checks flag missing/unknown roles, identical mover/seconder names,
+tentative wording, and names without explicit role evidence in the source.
+They do not prove that a motion was valid or match an attribution to a particular
+motion; review flagged lines against the transcript.
+
+QA findings are advisory: drafts and all summary outputs are retained, and a
+successful generation still exits successfully when review is needed.
+
+Run the regression tests without Ollama:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+---
+
 ## Notes on Lesson / Study Use
 
 For lessons, the pipeline generally does not need different audio capture logic.

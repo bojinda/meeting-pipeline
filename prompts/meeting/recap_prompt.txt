@@ -1,0 +1,12 @@
+Summarize only the supplied historical recap in short Markdown bullets.
+
+Rules:
+- Do not invent facts, names, motions, votes, decisions, or tasks.
+- Make it explicit that these events occurred at the previous meeting.
+- Preserve uncertainty and chronology.
+- Do not present previous decisions or assignments as business of the current meeting.
+- Output the bullet content only, without a title or headings. The caller will add the heading "Recap of Previous Meeting."
+- If no explicit historical content is available, write: None noted.
+
+Previous-meeting chunk summaries:
+{chunk_summaries}

@@ -17,6 +17,14 @@ Chunk metadata:
 - Chunk type: {chunk_type}
 - Speaker span: {speaker_span}
 - Time range: {start_time} to {end_time}
+- Meeting section: {meeting_section}
+
+Section rules:
+- This is one classified portion of a source chunk. Summarize only its supplied text.
+- Preserve the assigned section. Pre-meeting chatter is setup or informal talk; previous_meeting_recap is historical business; current_meeting_business and adjournment concern this meeting.
+- Historical decisions, motions, and tasks must stay historical. Do not present them as new business or new assignments.
+- For a recap portion, put the historical account under Topics and Important notes; write None noted in the current Decisions, Motions, and Action items sections.
+- Use the supplied names exactly; retain speaker labels where no name is supplied. Do not guess identities.
 
 Transcript chunk:
 {chunk_text}

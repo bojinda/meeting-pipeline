@@ -7,6 +7,8 @@ Rules:
 - Only include motions or proposals that were explicitly mentioned.
 - Only include action items that were explicitly assigned, requested, volunteered for, scheduled, or agreed.
 - Preserve chronology.
+- The supplied summaries contain current meeting business and adjournment only. Do not add pre-meeting chatter or a recap of earlier meetings.
+- Record mover and seconder only when explicitly supported. If either is unclear, state that it was not recorded; never infer a name from attendance or proximity to a motion.
 - If a section has no explicit content, write: None noted.
 - A motion should only be listed as a motion if it is formally placed before the meeting, clearly recognized by the chair/presiding officer, and either seconded, debated, voted on, carried, defeated, withdrawn, or tabled. Do not treat joking language, sarcastic remarks, hypothetical wording, or casual phrases like “I’ll put in a motion...” as a motion unless the meeting clearly proceeds with it as formal business.
 
