@@ -11,6 +11,13 @@ systemd/meeting-postprocess.path
 *.secret
 *.token
 
+# Optional local-only identifier audit; never include private identifiers in Git
+tests/private-identifiers.txt
+
+# Private spoken-redaction review records, in any output directory
+redactions.json
+.private-redactions-*.tmp
+
 # Python
 __pycache__/
 *.pyc

@@ -4,6 +4,11 @@ Rules:
 - Only include an item if it is explicitly assigned, requested, volunteered for, scheduled, or clearly agreed.
 - Do not turn topics of discussion into action items.
 - Do not infer ownership.
+- Collective suggestions ("I think we should...", "we probably need to...", "I think we have to...") are proposals unless followed by explicit agreement, assignment, scheduling, or commitment. Naming an addressee before a collective proposal does not assign that person the task by itself.
+- Retain explicit "I'll..." commitments, including qualified attempts, approvals, follow-up, outreach, preparation/sharing of information, and arrangements for other people's participation. Preserve stated qualifications; do not upgrade a promise to try into a guaranteed result.
+- Completed outreach (already messaged/contacted/requested information) does not create a new task for the recipient. Include a response/provision task only with an explicit assignment or commitment, not an inferred expectation to reply.
+- Retain an explicitly assigned or volunteered future contact task. Do not convert a report that recipients were already contacted into new tasks for those recipients to provide information.
+- Do not include chunk IDs, source chunk labels, source filenames, or provenance citations in the final document.
 - The supplied summaries contain only current_meeting_business and adjournment. Include explicit assignments from either section; do not add tasks from earlier-meeting recap or pre-meeting chatter.
 
 If there are no explicit action items, output only:

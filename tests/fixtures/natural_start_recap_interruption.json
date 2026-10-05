@@ -1,0 +1,120 @@
+{
+  "description": "Entirely synthetic railway-meeting dialogue covering a natural chair start, interrupted recap intent, retrospective resumption, collective proposals, explicit commitments, and named motion announcements.",
+  "turns": [
+    {
+      "speaker": "SPEAKER_00",
+      "text": "There is speculation about the North Terminal job.",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "the freight operator has those four-axle locomotives.",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "Units 101 and 202 have battery drain.",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "Okay guys all set here",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "start off with a recap of the last meeting.",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_03",
+      "text": "East Terminal has a red flag on the service track.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_04",
+      "text": "We discussed South Terminal brake recovery yesterday.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_03",
+      "text": "How do you handle the locomotive brake valve, manual operation, and suppression?",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "Okay. So, yeah, the last meeting, Morgan reported on crew staffing.",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "We approved the old staffing report.",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "The timeline is still being reviewed.",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "Moving right along.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "Anybody want to volunteer to go first?",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_03",
+      "text": "I can go first.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "Taylor, I think we have to request another meeting with the manager.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_03",
+      "text": "I'll approve access for both members.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_04",
+      "text": "I'll follow up with the employee.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_05",
+      "text": "I'll ask our team to start following this procedure.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_03",
+      "text": "I'll contact the coordinator.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_04",
+      "text": "I'll try to identify relevant references ... and we'll share the notes.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "Can we have a motion to adjourn?",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "I'll say a motion by Casey, seconded by Taylor there.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_02",
+      "text": "The meeting is adjourned.",
+      "expected": "adjournment"
+    }
+  ]
+}

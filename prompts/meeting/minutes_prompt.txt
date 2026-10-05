@@ -6,9 +6,13 @@ Rules:
 - Only include decisions that were clearly made.
 - Only include motions or proposals that were explicitly mentioned.
 - Only include action items that were explicitly assigned, requested, volunteered for, scheduled, or agreed.
+- Collective proposals such as "I think we should...", "we probably need to...", and "I think we have to..." belong under discussion/tentative next steps unless explicit agreement, assignment, scheduling, or commitment follows. Addressing a person by name does not assign responsibility. Preserve supported "I'll..." commitments, including qualified attempts.
 - Preserve chronology.
 - The supplied summaries contain current meeting business and adjournment only. Do not add pre-meeting chatter or a recap of earlier meetings.
 - Record mover and seconder only when explicitly supported. If either is unclear, state that it was not recorded; never infer a name from attendance or proximity to a motion.
+- For adjournment, preserve the explicitly announced mover and seconder names even when the chair or another participant reports them. Do not substitute the announcing speaker label. Include Carried only with an explicitly supported carried outcome; do not invent an outcome from the existence of named roles.
+- Completed messages or information requests are historical outreach, not new action items for their recipients. Require an explicit assignment or commitment before listing a task to respond or provide information.
+- Do not include chunk IDs, source chunk labels, source filenames, or provenance citations in the final document.
 - If a section has no explicit content, write: None noted.
 - A motion should only be listed as a motion if it is formally placed before the meeting, clearly recognized by the chair/presiding officer, and either seconded, debated, voted on, carried, defeated, withdrawn, or tabled. Do not treat joking language, sarcastic remarks, hypothetical wording, or casual phrases like “I’ll put in a motion...” as a motion unless the meeting clearly proceeds with it as formal business.
 

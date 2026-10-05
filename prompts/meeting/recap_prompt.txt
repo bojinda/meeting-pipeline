@@ -2,6 +2,7 @@ Summarize only the supplied historical recap in short Markdown bullets.
 
 Rules:
 - Do not invent facts, names, motions, votes, decisions, or tasks.
+- Do not include chunk IDs, source chunk labels, source filenames, or provenance citations in the final document.
 - Make it explicit that these events occurred at the previous meeting.
 - Preserve uncertainty and chronology.
 - Do not present previous decisions or assignments as business of the current meeting.

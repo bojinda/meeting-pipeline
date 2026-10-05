@@ -16,10 +16,13 @@ if [ -f "$CONFIG_FILE" ]; then
   set +a
 fi
 
+source "$BASE_DIR/bin/with-gpu-lock.sh"
+
 : "${WHISPERX_MODEL:=large-v2}"
 : "${WHISPERX_BATCH_SIZE:=4}"
 : "${WHISPERX_COMPUTE_TYPE:=float16}"
 : "${WHISPERX_DEVICE:=cuda}"
+: "${WHISPERX_DEVICE_INDEX:=0}"
 : "${WHISPERX_LANGUAGE:=en}"
 : "${DELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION:=0}"
 
@@ -38,6 +41,7 @@ STATUSFILE="$OUTDIR/status.txt"
   echo "Batch size: $WHISPERX_BATCH_SIZE"
   echo "Compute type: $WHISPERX_COMPUTE_TYPE"
   echo "Device: $WHISPERX_DEVICE"
+  echo "Device index: $WHISPERX_DEVICE_INDEX"
   echo "Delete source audio after transcription: $DELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION"
 } > "$STATUSFILE"
 
@@ -47,6 +51,7 @@ CMD=(
   --batch_size "$WHISPERX_BATCH_SIZE"
   --compute_type "$WHISPERX_COMPUTE_TYPE"
   --device "$WHISPERX_DEVICE"
+  --device_index "$WHISPERX_DEVICE_INDEX"
   --language "$WHISPERX_LANGUAGE"
   --diarize
   --hf_token "$HF_TOKEN"
@@ -74,7 +79,7 @@ done
   printf '\n\n'
 } >> "$STATUSFILE"
 
-if "${CMD[@]}" >"$LOGFILE" 2>&1; then
+if aihub_run_gpu_stage gpu0 "WhisperX (GPU0)" "${CMD[@]}" >"$LOGFILE" 2>&1; then
   {
     echo "Completed: $(date -Is)"
     echo "Success: yes"
@@ -109,7 +114,7 @@ if "${CMD[@]}" >"$LOGFILE" 2>&1; then
   fi
 
   if [ -f "$OUTDIR/chunks_out/transcript_chunks.jsonl" ]; then
-    if python "$BASE_DIR/bin/ollama_meeting_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
+    if aihub_run_gpu_stage gpu1 "Ollama meeting summaries (GPU1)" python "$BASE_DIR/bin/ollama_meeting_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
       echo "Summaries: yes" >> "$STATUSFILE"
       echo "Summary dir: ${MEETING_SUMMARIES_ROOT:-$BASE_DIR/meeting-summaries}/$(basename "$OUTDIR")" >> "$STATUSFILE"
     else

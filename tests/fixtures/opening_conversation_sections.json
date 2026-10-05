@@ -1,0 +1,100 @@
+{
+  "description": "Entirely synthetic dialogue covering pre-start conversation and invitations, an informal formal-start cue, previous-meeting recap, and current-business transitions.",
+  "turns": [
+    {
+      "speaker": "SPEAKER_00",
+      "text": "Hey everyone, good evening.",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "How was your time off?",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "I spent the break hiking.",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "Which equipment option would you prefer?",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "The standard equipment option works for me.",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "Hey, is there a meeting tomorrow, Riley?",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "I'll call Casey to add Morgan to the list.",
+      "expected": "pre_meeting_chatter"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "Okay, yeah, I guess we'll get started there.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "Do you have notes for last month's meeting?",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "If you wouldn't mind doing a little recap.",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "We discussed the previous safety report.",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "The proposal covers safety equipment.",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "Taylor will send the previous meeting's report.",
+      "expected": "previous_meeting_recap"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "Okay, thanks a lot.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "We'll move right along then.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "Anybody want to volunteer to go first?",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "I can go first.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_01",
+      "text": "Riley will send the current safety report Friday.",
+      "expected": "current_meeting_business"
+    },
+    {
+      "speaker": "SPEAKER_00",
+      "text": "The meeting is adjourned.",
+      "expected": "adjournment"
+    }
+  ]
+}

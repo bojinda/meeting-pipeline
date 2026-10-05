@@ -10,9 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from meeting_postprocess.aliases import load_aliases
+from meeting_postprocess.actions import filter_completed_request_tasks
+from meeting_postprocess.commitments import commitment_evidence
+from meeting_postprocess.motions import adjournment_announcements, correct_adjournment_roles
 from meeting_postprocess.normalization import prepare_text
 from meeting_postprocess.qa import check_minutes, write_report
-from meeting_postprocess.rendering import insert_recap
+from meeting_postprocess.rendering import insert_recap, strip_chunk_references
+from meeting_postprocess.redaction import redact_chunks, write_private_redactions
+from meeting_postprocess.publication import strip_private_references
 from meeting_postprocess.sections import ADJOURNMENT, BUSINESS, RECAP, prepare_chunks
 
 
@@ -274,22 +279,6 @@ def main(default_profile: str | None = None) -> int:
         print(f"ERROR: No chunks found in {chunks_jsonl}", file=sys.stderr)
         return 2
 
-    aliases: dict[str, str] = {}
-    if profile == "meeting":
-        try:
-            aliases = load_aliases(transcript_dir, args.speaker_aliases)
-            chunks = prepare_chunks(chunks, aliases)
-        except (OSError, ValueError, TypeError) as exc:
-            print(f"ERROR: Meeting preparation failed: {exc}", file=sys.stderr)
-            return 2
-        if not chunks:
-            print("ERROR: No meeting text found in transcript chunks", file=sys.stderr)
-            return 2
-        if args.keep_recap and any(chunk["meeting_section"] == RECAP for chunk in chunks):
-            if not (prompt_dir / "recap_prompt.txt").exists():
-                print(f"ERROR: Missing reduce prompt: {prompt_dir / 'recap_prompt.txt'}", file=sys.stderr)
-                return 2
-
     summary_root = Path(
         os.environ.get(
             profile_cfg["summary_root_env"],
@@ -299,6 +288,49 @@ def main(default_profile: str | None = None) -> int:
 
     summaries_dir = resolve_summary_dir(transcript_dir, summary_root)
     summaries_dir.mkdir(parents=True, exist_ok=True)
+
+    aliases: dict[str, str] = {}
+    redaction_warnings = []
+    if profile == "meeting":
+        try:
+            redacted = redact_chunks(chunks)
+            write_private_redactions(summaries_dir, redacted.redactions)
+            redaction_warnings = redacted.warnings
+            if redacted.redactions:
+                # A rerun must not leave older, unredacted derived files visible
+                # if a model/preparation error interrupts the new generation.
+                for filename in (
+                    "summary.md", "action-items.md", "minutes-draft.md",
+                    "chunk_summaries.jsonl", "meeting_sections.jsonl",
+                    "minutes-qa.md", "minutes-qa.json",
+                ):
+                    (summaries_dir / filename).unlink(missing_ok=True)
+            if redaction_warnings:
+                write_report(summaries_dir, redaction_warnings)
+                print(f"[qa] {len(redaction_warnings)} spoken-redaction warning(s); see minutes-qa.md", flush=True)
+            aliases = load_aliases(transcript_dir, args.speaker_aliases)
+            chunks = prepare_chunks(redacted.chunks, aliases)
+        except (OSError, ValueError, TypeError) as exc:
+            print(f"ERROR: Meeting preparation failed: {exc}", file=sys.stderr)
+            return 2
+        if not chunks:
+            if not redacted.redactions:
+                print("ERROR: No meeting text found in transcript chunks", file=sys.stderr)
+                return 2
+            # Deliberately withholding all content is a valid meeting run and
+            # must not create a model prompt or leave stale outputs behind.
+            (summaries_dir / "meeting_sections.jsonl").write_text("", encoding="utf-8")
+            (summaries_dir / "chunk_summaries.jsonl").write_text("", encoding="utf-8")
+            (summaries_dir / "summary.md").write_text("# Meeting Summary\nNo non-redacted meeting content available.\n", encoding="utf-8")
+            (summaries_dir / "action-items.md").write_text("# Action Items\nNo clear action items identified.\n", encoding="utf-8")
+            (summaries_dir / "minutes-draft.md").write_text("# Draft Minutes\nNo non-redacted meeting content available.\n", encoding="utf-8")
+            write_report(summaries_dir, redaction_warnings)
+            print("[done] all meeting content withheld; no Ollama calls made", flush=True)
+            return 0
+        if args.keep_recap and any(chunk["meeting_section"] == RECAP for chunk in chunks):
+            if not (prompt_dir / "recap_prompt.txt").exists():
+                print(f"ERROR: Missing reduce prompt: {prompt_dir / 'recap_prompt.txt'}", file=sys.stderr)
+                return 2
 
     if profile == "meeting":
         # Keep the original transcript/chunk index intact and save evidence for
@@ -327,6 +359,10 @@ def main(default_profile: str | None = None) -> int:
         print(f"[info] keep_recap={args.keep_recap}", flush=True)
 
     chunk_summaries: list[dict[str, Any]] = []
+    current_source = "\n".join(
+        chunk["text"] for chunk in chunks
+        if chunk.get("meeting_section") in {BUSINESS, ADJOURNMENT}
+    ) if profile == "meeting" else ""
 
     for idx, chunk in enumerate(chunks, start=1):
         chunk_id = chunk.get("chunk_id", f"chunk-{idx:03d}")
@@ -350,6 +386,9 @@ def main(default_profile: str | None = None) -> int:
 
         if profile == "meeting":
             summary_text = prepare_text(summary_text, aliases)
+            if chunk["meeting_section"] in {BUSINESS, ADJOURNMENT}:
+                summary_text = filter_completed_request_tasks(summary_text, current_source, action_sections_only=True)
+                summary_text = correct_adjournment_roles(summary_text, current_source)
 
         row = {
             "chunk_id": chunk_id,
@@ -374,7 +413,12 @@ def main(default_profile: str | None = None) -> int:
     combined = build_reduce_input(chunk_summaries)
     current_meeting_combined = combined
     recap_combined = ""
+    commitments = []
     if profile == "meeting":
+        commitments = commitment_evidence(chunks)
+        combined = build_reduce_input([
+            row for row in chunk_summaries if row["meeting_section"] in {RECAP, BUSINESS, ADJOURNMENT}
+        ]) or "No historical recap, current meeting business or adjournment was identified."
         current_meeting_combined = build_reduce_input([
             row for row in chunk_summaries if row["meeting_section"] in {BUSINESS, ADJOURNMENT}
         ]) or "No explicit current meeting business or adjournment was identified."
@@ -395,6 +439,17 @@ def main(default_profile: str | None = None) -> int:
             if output_filename in {"minutes-draft.md", "action-items.md"}
             else combined,
         )
+        if profile == "meeting" and output_filename in {"minutes-draft.md", "action-items.md"} and commitments:
+            reduce_prompt += "\n\nSource-backed future commitment evidence (current meeting only):\n"
+            reduce_prompt += "\n".join("- " + evidence for evidence in commitments)
+            reduce_prompt += "\nUse this supplemental source evidence to check for tasks omitted from chunk summaries. These quotations are not pre-approved action items. Preserve speaker ownership, conditions and qualifications such as 'try to'; do not infer additional owners or assignments."
+            reduce_prompt += " Keep multi-step workflows separate by actor. Preserve an explicit recipient named in the speaker's own task; leave an unstated recipient unstated. A later third party's delivery or redaction step must not supply the speaker's recipient or redaction duty, even if the map summary merges those steps."
+        if profile == "meeting" and output_filename in {"minutes-draft.md", "summary.md"}:
+            announcements = adjournment_announcements(current_source)
+            if announcements:
+                reduce_prompt += "\n\nExplicit named adjournment announcements from the current transcript:\n"
+                reduce_prompt += "\n".join("- " + announcement.render() for announcement in announcements)
+                reduce_prompt += "\nThese names are the announced mover/seconder, not the announcing speaker's identity. Preserve the names when recording the motion."
 
         try:
             content = call_ollama(
@@ -426,12 +481,20 @@ def main(default_profile: str | None = None) -> int:
 
         if profile == "meeting":
             content = prepare_text(content, aliases)
+            if output_filename in {"minutes-draft.md", "summary.md"}:
+                content = correct_adjournment_roles(content, current_source)
+            if output_filename in {"minutes-draft.md", "action-items.md"}:
+                content = filter_completed_request_tasks(
+                    content, current_source, action_sections_only=output_filename == "minutes-draft.md",
+                )
+            content = strip_chunk_references(content, [chunk["file_name"] for chunk in chunks if chunk.get("file_name")])
+            content = strip_private_references(content)
         out_path = summaries_dir / output_filename
         out_path.write_text(content.rstrip() + "\n", encoding="utf-8")
         print(f"[info] wrote {out_path}", flush=True)
         if profile == "meeting" and output_filename == "minutes-draft.md":
             source = "\n".join(chunk["text"] for chunk in chunks)
-            findings = check_minutes(content, source=source)
+            findings = check_minutes(content, source=source) + redaction_warnings
             write_report(summaries_dir, findings)
             print(f"[qa] {len(findings)} finding(s); see {summaries_dir / 'minutes-qa.md'}", flush=True)
 

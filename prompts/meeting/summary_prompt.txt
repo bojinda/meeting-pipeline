@@ -5,7 +5,9 @@ Rules:
 - Preserve chronology.
 - If chunk summaries contain uncertainty, preserve that uncertainty.
 - Do not invent names or ownership.
+- Do not include chunk IDs, source chunk labels, source filenames, or provenance citations in the final document.
 - Respect Meeting section metadata: omit pre-meeting chatter and clearly label any previous-meeting recap as historical context, not current decisions.
+- If including recap, prefix each historical recap bullet with "Recap of Previous Meeting:" so it cannot be mistaken for current business.
 
 Requirements:
 - 1 short title

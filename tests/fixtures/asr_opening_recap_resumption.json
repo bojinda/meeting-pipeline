@@ -1,0 +1,15 @@
+{
+  "description": "Synthetic ASR turns with hesitation fillers, a merged opening, interrupted history, and explicit retrospective resumption.",
+  "turns": [
+    {"speaker": "Casey", "text": "PRIVATE_CHATTER_SENTINEL vacation plans sound good.", "expected": "pre_meeting_chatter"},
+    {"speaker": "Chair", "text": "Yeah okay guys all set here oh start off with a recap of the last meeting.", "expected": "previous_meeting_recap"},
+    {"speaker": "Chair", "text": "We discussed the HISTORICAL_SIGNAL report.", "expected": "previous_meeting_recap"},
+    {"speaker": "Morgan", "text": "Today the CURRENT_SIGNAL equipment needs inspection.", "expected": "current_meeting_business"},
+    {"speaker": "Chair", "text": "So, uh, yeah, the last meeting, Taylor reported two investigations.", "expected": "previous_meeting_recap"},
+    {"speaker": "Chair", "text": "The old staffing report was approved.", "expected": "previous_meeting_recap"},
+    {"speaker": "Chair", "text": "Okay, moving right along then.", "expected": "current_meeting_business"},
+    {"speaker": "Taylor", "text": "I'll send the NEW_SIGNAL inspection notes tomorrow.", "expected": "current_meeting_business"},
+    {"speaker": "Chair", "text": "Motion to adjourn.", "expected": "adjournment"},
+    {"speaker": "Chair", "text": "Moved by Taylor, seconded by Casey.", "expected": "adjournment"}
+  ]
+}

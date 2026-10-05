@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .normalization import MAC_YARD_VARIANT, MOJIBAKE, SPEAKER_LABEL
+from .motions import role_names
 
 
 @dataclass
@@ -17,22 +18,7 @@ class Finding:
     excerpt: str
 
 
-_ROLE = re.compile(r"\b(moved\s+by|seconded\s+by|mover|seconder)\b\s*:?\s*", re.IGNORECASE)
 _UNKNOWN = re.compile(r"^(?:unknown|unclear|unidentified|not (?:noted|known|recorded|specified)|none(?: noted)?|n/?a|tbd|\?+)$", re.IGNORECASE)
-
-
-def _role_names(line: str) -> list[tuple[str, str]]:
-    # Strip emphasis first so '**Moved by:** Alice' is handled like plain text.
-    plain = line.replace("**", "").replace("__", "")
-    matches = list(_ROLE.finditer(plain))
-    names = []
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(plain)
-        name = re.split(r"[;|,()]|\.(?:\s|$)", plain[match.end():end], maxsplit=1)[0]
-        name = re.sub(r"\s+and\s*$", "", name, flags=re.IGNORECASE).strip(" .:-*[]")
-        role = "mover" if match.group(1).lower().startswith(("moved", "mover")) else "seconder"
-        names.append((role, name))
-    return names
 
 
 def _motion_evidence(source: str) -> dict[str, set[str]]:
@@ -47,7 +33,7 @@ def _motion_evidence(source: str) -> dict[str, set[str]]:
                 evidence["mover"].add(name)
             if re.search(r"\bI (?:second|seconded)(?:\s+(?:it|that|this|the motion)|[.!]|$)", utterance, re.IGNORECASE):
                 evidence["seconder"].add(name)
-        for role, name in _role_names(utterance):
+        for role, name in role_names(utterance):
             if name:
                 evidence[role].add(name.casefold())
         for name in speakers:
@@ -95,7 +81,7 @@ def check_minutes(content: str, source: str | None = None) -> list[Finding]:
             continue
         if _malformed_bullet(line):
             flag("malformed_bullet", "Possible malformed Markdown bullet or list marker.")
-        roles = _role_names(line)
+        roles = role_names(line)
         if not line.strip() or line.lstrip().startswith("#") or (re.match(r"^\s*[-+*]\s", line) and not roles):
             motion_block = {}
         for role, name in roles:
@@ -116,5 +102,6 @@ def write_report(directory: Path, findings: list[Finding]) -> None:
     (directory / "minutes-qa.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     lines = ["# Draft Minutes QA", "", "Review required." if findings else "No automated QA findings.", ""]
     for finding in findings:
-        lines.append(f"- Line {finding.line} [{finding.code}]: {finding.message}")
+        location = f"Line {finding.line}" if finding.line else "Source redaction"
+        lines.append(f"- {location} [{finding.code}]: {finding.message}")
     (directory / "minutes-qa.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

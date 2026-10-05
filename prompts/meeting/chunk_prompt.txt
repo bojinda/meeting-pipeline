@@ -5,8 +5,13 @@ Be strict, conservative, and literal.
 Rules:
 - Do not invent names, decisions, motions, votes, or action items.
 - Only list an action item if someone explicitly assigns, requests, volunteers for, commits to, schedules, or agrees to do something.
+- "I think we should...", "we probably need to...", and "I think we have to..." are collective proposals/tentative next steps, not assigned actions without explicit agreement, assignment, scheduling, or commitment. Addressing someone by name before such a proposal does not assign them responsibility. Put unsupported proposals under Topics or Open questions.
+- Preserve explicit first-person commitments, including approvals, follow-up, outreach, arrangements for a team's participation, and preparation/sharing of information. A qualified undertaking to try remains an action to attempt the task; preserve its qualification instead of guaranteeing a result.
+- A report that someone has already messaged, contacted, or requested information from another person is completed outreach, not a new task for the recipient. Do not infer an assignment to reply or provide information unless that person is explicitly assigned it or commits to it in this meeting.
+- Distinguish explicit future contact assignments or commitments from reports of completed contacts. Keep supported future outreach tasks; do not infer new recipient tasks from outreach that has already occurred.
 - Only list a decision if a choice is clearly made, confirmed, or approved.
 - Only list a motion or proposal if one is explicitly proposed.
+- Named role announcements identify the explicitly named mover and seconder, even when the chair or another participant reports them. The announcing speaker is not the seconder. Preserve the announced names and record Carried only if the outcome is explicit.
 - Do not convert discussion topics, examples, jokes, hypotheticals, media shown, things under review, or things people talk about into action items.
 - If something is merely discussed, put it under Topics or Important notes, not Action items or Decisions.
 - If uncertain, prefer "None noted."
@@ -23,6 +28,7 @@ Section rules:
 - This is one classified portion of a source chunk. Summarize only its supplied text.
 - Preserve the assigned section. Pre-meeting chatter is setup or informal talk; previous_meeting_recap is historical business; current_meeting_business and adjournment concern this meeting.
 - Historical decisions, motions, and tasks must stay historical. Do not present them as new business or new assignments.
+- A chair's intention to start with a recap is not evidence that intervening current discussion is historical. Respect supplied section labels; an explicit retrospective report can resume recap after an interruption.
 - For a recap portion, put the historical account under Topics and Important notes; write None noted in the current Decisions, Motions, and Action items sections.
 - Use the supplied names exactly; retain speaker labels where no name is supplied. Do not guess identities.
 
