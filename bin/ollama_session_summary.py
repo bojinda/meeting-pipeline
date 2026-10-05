@@ -143,6 +143,32 @@ def resolve_summary_dir(
     return summary_root / transcript_dir.name
 
 
+def resolve_model_defaults(args: argparse.Namespace) -> None:
+    """Resolve only omitted CLI options after the final profile is selected."""
+    settings = (
+        ("map_model", "MAP_MODEL", "qwen2.5:32b", str),
+        ("reduce_model", "REDUCE_MODEL", "qwen2.5:32b", str),
+        ("map_num_ctx", "MAP_NUM_CTX", None, int),
+        ("reduce_num_ctx", "REDUCE_NUM_CTX", None, int),
+    )
+    for attribute, suffix, fallback, convert in settings:
+        if getattr(args, attribute) is not None:
+            continue
+        keys = [f"OLLAMA_{suffix}"]
+        if args.profile == "meeting":
+            keys.insert(0, f"MEETING_{suffix}")
+        for key in keys:
+            value = os.environ.get(key)
+            if value:
+                try:
+                    setattr(args, attribute, convert(value))
+                except ValueError as exc:
+                    raise ValueError(f"{key} must be an integer, got {value!r}") from exc
+                break
+        else:
+            setattr(args, attribute, fallback)
+
+
 def main(default_profile: str | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Summarize transcript chunks with Ollama."
@@ -165,13 +191,11 @@ def main(default_profile: str | None = None) -> int:
     )
     parser.add_argument(
         "--map-model",
-        default=os.environ.get("OLLAMA_MAP_MODEL", "qwen2.5:32b"),
-        help="Model used for chunk-level summaries.",
+        help="Chunk model (meeting default: MEETING_MAP_MODEL, then OLLAMA_MAP_MODEL).",
     )
     parser.add_argument(
         "--reduce-model",
-        default=os.environ.get("OLLAMA_REDUCE_MODEL", "qwen2.5:32b"),
-        help="Model used for final output documents.",
+        help="Final-output model (meeting default: MEETING_REDUCE_MODEL, then OLLAMA_REDUCE_MODEL).",
     )
     parser.add_argument(
         "--keep-alive",
@@ -187,18 +211,12 @@ def main(default_profile: str | None = None) -> int:
     parser.add_argument(
         "--map-num-ctx",
         type=int,
-        default=int(os.environ["OLLAMA_MAP_NUM_CTX"])
-        if os.environ.get("OLLAMA_MAP_NUM_CTX")
-        else None,
-        help="Context window for map-stage chunk summaries.",
+        help="Map context (meeting default: MEETING_MAP_NUM_CTX, then OLLAMA_MAP_NUM_CTX).",
     )
     parser.add_argument(
         "--reduce-num-ctx",
         type=int,
-        default=int(os.environ["OLLAMA_REDUCE_NUM_CTX"])
-        if os.environ.get("OLLAMA_REDUCE_NUM_CTX")
-        else None,
-        help="Context window for reduce-stage final documents.",
+        help="Reduce context (meeting default: MEETING_REDUCE_NUM_CTX, then OLLAMA_REDUCE_NUM_CTX).",
     )
     parser.add_argument(
         "--speaker-aliases", type=Path,
@@ -211,6 +229,10 @@ def main(default_profile: str | None = None) -> int:
     )
 
     args = parser.parse_args()
+    try:
+        resolve_model_defaults(args)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     transcript_dir = args.transcript_dir.resolve()
     profile = args.profile
@@ -350,10 +372,10 @@ def main(default_profile: str | None = None) -> int:
     print(f"[info] wrote {chunk_summaries_path}", flush=True)
 
     combined = build_reduce_input(chunk_summaries)
-    minutes_combined = combined
+    current_meeting_combined = combined
     recap_combined = ""
     if profile == "meeting":
-        minutes_combined = build_reduce_input([
+        current_meeting_combined = build_reduce_input([
             row for row in chunk_summaries if row["meeting_section"] in {BUSINESS, ADJOURNMENT}
         ]) or "No explicit current meeting business or adjournment was identified."
         recap_combined = build_reduce_input([
@@ -369,7 +391,9 @@ def main(default_profile: str | None = None) -> int:
         print(f"[reduce] generating {output_filename}", flush=True)
         reduce_prompt = build_reduce_prompt(
             prompt_dir, template_name,
-            minutes_combined if output_filename == "minutes-draft.md" else combined,
+            current_meeting_combined
+            if output_filename in {"minutes-draft.md", "action-items.md"}
+            else combined,
         )
 
         try:

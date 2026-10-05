@@ -248,6 +248,12 @@ Important settings include:
 - `OLLAMA_MAP_NUM_CTX`
 - `OLLAMA_REDUCE_NUM_CTX`
 
+Optional meeting-only overrides: `MEETING_MAP_MODEL`, `MEETING_REDUCE_MODEL`,
+`MEETING_MAP_NUM_CTX`, and `MEETING_REDUCE_NUM_CTX`. In meeting mode, precedence
+is CLI flag → nonempty `MEETING_*` variable → nonempty `OLLAMA_*` variable →
+existing built-in default (`qwen2.5:32b` for models; Ollama's default context
+when no context is configured). Lesson mode ignores these meeting overrides.
+
 ### Output paths
 - `MEETING_SUMMARIES_ROOT`
 - `LESSON_SUMMARIES_ROOT`
@@ -372,6 +378,53 @@ OLLAMA_REDUCE_NUM_CTX=32768
 
 If `ollama ps` shows the larger context after a run, that is usually expected because the reduce step was the last model state loaded.
 
+### Recommended local models
+
+For this meeting profile, use [`qwen3.8:27b`](https://ollama.com/library/qwen3.8)
+for reduce/final minutes. Use [`qwen3.6:27b`](https://ollama.com/library/qwen3.6)
+or your existing `qwen2.5:32b` for map/chunk summaries.
+[`qwen2.5-coder`](https://ollama.com/library/qwen2.5-coder) models are not recommended for meeting
+minutes; use a general-purpose model for this prose workflow.
+
+Start with a reduce-only upgrade: keep your current map model and change the
+reduce model to `qwen3.8:27b`. Review the resulting minutes before trying
+`qwen3.8:27b` for both stages. Models remain configurable; no Qwen3 model name
+is required by the summarizer.
+
+Recommended command with the newer map model and an optional historical recap:
+
+```bash
+python bin/ollama_meeting_summary.py meeting-transcripts/session-123 \
+  --map-model qwen3.6:27b --reduce-model qwen3.8:27b \
+  --map-num-ctx 16384 --reduce-num-ctx 32768 --keep-recap
+```
+
+For a reduce-only upgrade, replace `--map-model qwen3.6:27b` with
+`--map-model qwen2.5:32b` or your existing fast model. Omit `--keep-recap` when
+you do not want the recap, or use `--no-keep-recap` to override an enabled
+`MEETING_KEEP_RECAP` setting.
+
+For unattended meeting runs, uncomment these optional settings in `config/.env`:
+
+```env
+MEETING_MAP_MODEL=qwen3.6:27b
+MEETING_REDUCE_MODEL=qwen3.8:27b
+MEETING_MAP_NUM_CTX=16384
+MEETING_REDUCE_NUM_CTX=32768
+```
+
+The postprocess wrapper exports `config/.env`. For direct Python invocation,
+export the variables yourself or use the explicit CLI command above. CLI flags
+always win, including when `--profile meeting` is passed to the shared engine.
+
+Home Assistant's existing `shell_command` calls over SSH use the same
+`bin/ha-start-meeting.sh`, `bin/ha-stop-meeting.sh`, `bin/ha-start-lesson.sh`, and
+`bin/ha-stop-lesson.sh` interfaces. The meeting stop script sends the remote
+stop command; model selection occurs in the subsequent `postprocess-meeting.sh`
+step, which already exports `config/.env` and calls the meeting summarizer
+without model flags. Enable `MEETING_*` there for meeting runs. Lesson start/stop
+behavior and lesson model defaults remain unchanged.
+
 ---
 
 ## Meeting Minutes Post-processing
@@ -425,8 +478,11 @@ Time ranges refer to the containing source chunk, not precise section boundaries
 The classifier is heuristic: implicit transitions and mixed historical/current
 statements still need human review.
 
-Draft minutes use current-business and adjournment summaries. To include the
-historical recap, pass:
+`action-items.md` and `minutes-draft.md` use the same reduce input containing
+only current-business and adjournment summaries. Recap and pre-meeting chatter
+are excluded from that input. `summary.md` may include recap only as clearly
+labelled historical context. To include a separate historical recap in draft
+minutes, pass:
 
 ```bash
 python bin/ollama_meeting_summary.py meeting-transcripts/session-123 --keep-recap

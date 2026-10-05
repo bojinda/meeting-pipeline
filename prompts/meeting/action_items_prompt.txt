@@ -4,7 +4,7 @@ Rules:
 - Only include an item if it is explicitly assigned, requested, volunteered for, scheduled, or clearly agreed.
 - Do not turn topics of discussion into action items.
 - Do not infer ownership.
-- Use only current_meeting_business summaries for new action items. Earlier-meeting recap and pre-meeting chatter are context and must not create new assignments.
+- The supplied summaries contain only current_meeting_business and adjournment. Include explicit assignments from either section; do not add tasks from earlier-meeting recap or pre-meeting chatter.
 
 If there are no explicit action items, output only:
 

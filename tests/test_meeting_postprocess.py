@@ -157,7 +157,7 @@ class QATests(unittest.TestCase):
 
 
 class PipelineTests(unittest.TestCase):
-    def run_pipeline(self, root: Path, text: str, options: list[str] | None = None, aliases=None, profile="meeting"):
+    def run_pipeline(self, root: Path, text: str, options: list[str] | None = None, aliases=None, profile="meeting", environment=None, default_profile=None):
         transcript = root / "session-123"
         chunk_dir = transcript / "chunks_out"
         chunk_dir.mkdir(parents=True)
@@ -180,9 +180,14 @@ class PipelineTests(unittest.TestCase):
                 return "# Draft Minutes\n\n## Topics Discussed\n- Alex discussed Mackyard and Transport Canadaâ€™s hypodermical guidance.\n- SPEAKER_09 offered comments.\n-bad bullet\n- Moved by: Alex; Seconded by: Sam."
             return "# Other output\n- SPEAKER_00 Mack Yard."
 
-        argv = ["summarizer", str(transcript), "--profile", profile] + (options or [])
-        with patch.object(sys, "argv", argv), patch.dict(os.environ, {"MEETING_SUMMARIES_ROOT": str(root / "outputs"), "LESSON_SUMMARIES_ROOT": str(root / "outputs"), "MEETING_KEEP_RECAP": "0"}), patch.object(engine, "call_ollama", side_effect=fake_ollama), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            status = engine.main()
+        argv = ["summarizer", str(transcript)]
+        if profile is not None:
+            argv.extend(["--profile", profile])
+        argv.extend(options or [])
+        env = {"MEETING_SUMMARIES_ROOT": str(root / "outputs"), "LESSON_SUMMARIES_ROOT": str(root / "outputs"), "MEETING_KEEP_RECAP": "0"}
+        env.update(environment or {})
+        with patch.object(sys, "argv", argv), patch.dict(os.environ, env, clear=True), patch.object(engine, "call_ollama", side_effect=fake_ollama), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            status = engine.main(default_profile=default_profile)
         self.assertEqual(index.read_text(encoding="utf-8"), original)
         return status, calls, root / "outputs" / transcript.name
 
@@ -215,6 +220,38 @@ class PipelineTests(unittest.TestCase):
             minutes = (output / "minutes-draft.md").read_text(encoding="utf-8")
             self.assertIn("## Recap of Previous Meeting\n\n- Previously approved OLD Mac Yard plan.", minutes)
 
+    def test_action_items_use_same_current_sections_as_minutes(self):
+        text = "[SPEAKER_00] Good morning everyone. Let's review the previous meeting. OLD plan approved. Moving on to new business. NEW plan discussed. The meeting is adjourned. Sam will circulate the notes tomorrow."
+        for options in ([], ["--keep-recap"]):
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as directory:
+                status, calls, _ = self.run_pipeline(Path(directory), text, options)
+                self.assertEqual(status, 0)
+                action_prompt = next(c["prompt"] for c in calls if "write an action-items document" in c["prompt"])
+                minutes_prompt = next(c["prompt"] for c in calls if "write formal draft minutes" in c["prompt"])
+                action_input = action_prompt.split("Chunk summaries:\n", 1)[1]
+                self.assertEqual(action_input, minutes_prompt.split("Chunk summaries:\n", 1)[1])
+                self.assertNotIn("OLD plan", action_input)
+                self.assertNotIn("Good morning", action_input)
+                self.assertNotIn(f"Meeting section: {RECAP}", action_input)
+                self.assertNotIn(f"Meeting section: {PRE_MEETING}", action_input)
+                self.assertIn(f"Meeting section: {BUSINESS}", action_input)
+                self.assertIn(f"Meeting section: {ADJOURNMENT}", action_input)
+                self.assertIn("NEW plan", action_input)
+                self.assertIn("Sam will circulate the notes tomorrow", action_input)
+                summary_prompt = next(c["prompt"] for c in calls if "write a concise executive summary" in c["prompt"])
+                self.assertIn("OLD plan", summary_prompt)
+                self.assertIn(f"Meeting section: {RECAP}", summary_prompt)
+                self.assertIn("clearly label any previous-meeting recap as historical context", summary_prompt)
+
+    def test_action_items_with_only_recap_have_no_historical_reduce_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status, calls, _ = self.run_pipeline(Path(directory), "[SPEAKER_00] Good morning. At the last meeting, Alex was assigned to circulate the OLD report.")
+            self.assertEqual(status, 0)
+            action_prompt = next(c["prompt"] for c in calls if "write an action-items document" in c["prompt"])
+            action_input = action_prompt.split("Chunk summaries:\n", 1)[1]
+            self.assertEqual(action_input.strip(), "No explicit current meeting business or adjournment was identified.")
+            self.assertNotIn("OLD report", action_input)
+
     def test_keep_recap_without_recap_does_not_add_an_extra_call(self):
         with tempfile.TemporaryDirectory() as directory:
             status, calls, output = self.run_pipeline(Path(directory), "[SPEAKER_00] Current discussion of the budget.", ["--keep-recap"])
@@ -231,6 +268,112 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse((output / "meeting_sections.jsonl").exists())
             self.assertFalse((output / "minutes-qa.json").exists())
             self.assertIn("SPEAKER_00 Mack Yard", (output / "lesson-notes.md").read_text(encoding="utf-8"))
+
+    def assert_model_calls(self, calls, map_model, reduce_model, map_ctx, reduce_ctx):
+        map_calls = [c for c in calls if "Transcript chunk:\n" in c["prompt"]]
+        reduce_calls = [c for c in calls if c not in map_calls]
+        self.assertTrue(map_calls)
+        self.assertTrue(reduce_calls)
+        for call in map_calls:
+            self.assertEqual((call["model"], call["num_ctx"]), (map_model, map_ctx))
+        for call in reduce_calls:
+            self.assertEqual((call["model"], call["num_ctx"]), (reduce_model, reduce_ctx))
+
+    def test_meeting_environment_defaults_override_shared_defaults_including_recap(self):
+        environment = {
+            "MEETING_MAP_MODEL": "qwen3.6:27b", "MEETING_REDUCE_MODEL": "qwen3.8:27b",
+            "MEETING_MAP_NUM_CTX": "16384", "MEETING_REDUCE_NUM_CTX": "32768",
+            "OLLAMA_MAP_MODEL": "shared-map", "OLLAMA_REDUCE_MODEL": "shared-reduce",
+            "OLLAMA_MAP_NUM_CTX": "4096", "OLLAMA_REDUCE_NUM_CTX": "8192",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            status, calls, output = self.run_pipeline(
+                Path(directory), "[SPEAKER_00] At the last meeting, OLD plan was approved. Moving on to new business. NEW plan discussed.",
+                ["--keep-recap"], environment=environment, profile=None, default_profile="meeting",
+            )
+            self.assertEqual(status, 0)
+            self.assert_model_calls(calls, "qwen3.6:27b", "qwen3.8:27b", 16384, 32768)
+            self.assertEqual(len([c for c in calls if "Transcript chunk:\n" not in c["prompt"]]), 4)
+            self.assertIn("## Recap of Previous Meeting", (output / "minutes-draft.md").read_text(encoding="utf-8"))
+
+    def test_meeting_cli_overrides_environment_even_invalid_context_defaults(self):
+        environment = {
+            "MEETING_MAP_MODEL": "env-map", "MEETING_REDUCE_MODEL": "env-reduce",
+            "MEETING_MAP_NUM_CTX": "invalid", "MEETING_REDUCE_NUM_CTX": "invalid",
+            "OLLAMA_MAP_NUM_CTX": "also-invalid", "OLLAMA_REDUCE_NUM_CTX": "also-invalid",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            status, calls, _ = self.run_pipeline(
+                Path(directory), "[SPEAKER_00] Current business.",
+                ["--map-model", "custom-fast:latest", "--reduce-model", "custom-final:latest",
+                 "--map-num-ctx", "8192", "--reduce-num-ctx", "49152"], environment=environment,
+            )
+            self.assertEqual(status, 0)
+            self.assert_model_calls(calls, "custom-fast:latest", "custom-final:latest", 8192, 49152)
+
+    def test_meeting_partial_overrides_fall_back_per_setting(self):
+        environment = {
+            "MEETING_REDUCE_MODEL": "qwen3.8:27b", "MEETING_REDUCE_NUM_CTX": "32768",
+            "MEETING_MAP_MODEL": "", "MEETING_MAP_NUM_CTX": "",
+            "OLLAMA_MAP_MODEL": "qwen2.5:32b", "OLLAMA_MAP_NUM_CTX": "16384",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            status, calls, _ = self.run_pipeline(Path(directory), "[SPEAKER_00] Current business.", environment=environment)
+            self.assertEqual(status, 0)
+            self.assert_model_calls(calls, "qwen2.5:32b", "qwen3.8:27b", 16384, 32768)
+
+    def test_meeting_without_overrides_preserves_shared_environment_defaults(self):
+        environment = {
+            "OLLAMA_MAP_MODEL": "existing-fast", "OLLAMA_REDUCE_MODEL": "existing-final",
+            "OLLAMA_MAP_NUM_CTX": "4096", "OLLAMA_REDUCE_NUM_CTX": "8192",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            status, calls, _ = self.run_pipeline(Path(directory), "[SPEAKER_00] Current business.", environment=environment)
+            self.assertEqual(status, 0)
+            self.assert_model_calls(calls, "existing-fast", "existing-final", 4096, 8192)
+
+    def test_unconfigured_profiles_keep_existing_builtin_defaults(self):
+        for profile in ("meeting", "lesson"):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
+                status, calls, _ = self.run_pipeline(Path(directory), "[SPEAKER_00] Current discussion.", profile=profile)
+                self.assertEqual(status, 0)
+                self.assert_model_calls(calls, "qwen2.5:32b", "qwen2.5:32b", None, None)
+
+    def test_lesson_defaults_ignore_all_meeting_model_settings(self):
+        environment = {
+            "MEETING_MAP_MODEL": "qwen3.6:27b", "MEETING_REDUCE_MODEL": "qwen3.8:27b",
+            "MEETING_MAP_NUM_CTX": "invalid", "MEETING_REDUCE_NUM_CTX": "invalid",
+            "OLLAMA_MAP_MODEL": "lesson-map", "OLLAMA_REDUCE_MODEL": "lesson-reduce",
+            "OLLAMA_MAP_NUM_CTX": "4096", "OLLAMA_REDUCE_NUM_CTX": "8192",
+        }
+        # Test both the lesson wrapper's default and an explicit lesson profile
+        # overriding a meeting wrapper default; the selected profile must win.
+        for profile, default_profile in ((None, "lesson"), ("lesson", "meeting")):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
+                status, calls, _ = self.run_pipeline(Path(directory), "[SPEAKER_00] Lesson content.", profile=profile, default_profile=default_profile, environment=environment)
+                self.assertEqual(status, 0)
+                self.assert_model_calls(calls, "lesson-map", "lesson-reduce", 4096, 8192)
+        meeting_only = {key: value for key, value in environment.items() if key.startswith("MEETING_")}
+        with tempfile.TemporaryDirectory() as directory:
+            status, calls, _ = self.run_pipeline(Path(directory), "[SPEAKER_00] Lesson content.", profile="lesson", environment=meeting_only)
+            self.assertEqual(status, 0)
+            self.assert_model_calls(calls, "qwen2.5:32b", "qwen2.5:32b", None, None)
+
+    def test_explicit_meeting_profile_uses_meeting_defaults_from_lesson_wrapper(self):
+        environment = {
+            "MEETING_MAP_MODEL": "meeting-map", "MEETING_REDUCE_MODEL": "meeting-reduce",
+            "MEETING_MAP_NUM_CTX": "16384", "MEETING_REDUCE_NUM_CTX": "32768",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            status, calls, _ = self.run_pipeline(Path(directory), "[SPEAKER_00] Current business.", profile="meeting", default_profile="lesson", environment=environment)
+            self.assertEqual(status, 0)
+            self.assert_model_calls(calls, "meeting-map", "meeting-reduce", 16384, 32768)
+
+    def test_invalid_selected_meeting_context_reports_configuration_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(SystemExit) as error:
+                self.run_pipeline(Path(directory), "[SPEAKER_00] Current business.", environment={"MEETING_MAP_NUM_CTX": "invalid"})
+            self.assertEqual(error.exception.code, 2)
 
     def test_bad_alias_configuration_stops_before_model_calls(self):
         with tempfile.TemporaryDirectory() as directory:
