@@ -19,6 +19,8 @@ from meeting_postprocess.rendering import insert_recap, strip_chunk_references
 from meeting_postprocess.redaction import redact_chunks, write_private_redactions
 from meeting_postprocess.publication import strip_private_references
 from meeting_postprocess.sections import ADJOURNMENT, BUSINESS, RECAP, prepare_chunks
+from meeting_postprocess.speaker_suggestions import PRIVATE_SUGGESTIONS_FILENAME, build_speaker_suggestions, load_roster, speaker_input, write_private_json
+from meeting_postprocess.speaker_review import review_speakers
 
 
 def call_ollama(
@@ -232,8 +234,18 @@ def main(default_profile: str | None = None) -> int:
         default=os.environ.get("MEETING_KEEP_RECAP", "0").lower() in {"1", "true", "yes"},
         help="Include a separately labelled Recap of Previous Meeting in draft minutes.",
     )
+    parser.add_argument("--suggest-speakers", action="store_true", help="Meeting only: write private advisory text-based speaker suggestions; never apply them.")
+    parser.add_argument("--speaker-roster", type=Path, help="Private roster for the optional meeting suggestion stage (default: per-meeting speaker_roster.private.json).")
+    parser.add_argument("--suggest-speakers-llm", action="store_true", help="Explicitly request one bounded local Ollama speaker review; requires --suggest-speakers.")
+    parser.add_argument("--speaker-suggestion-model", help="Optional local speaker-review model override (default: selected meeting reduce model).")
 
     args = parser.parse_args()
+    if args.profile != "meeting" and (args.suggest_speakers or args.speaker_roster is not None or args.suggest_speakers_llm or args.speaker_suggestion_model):
+        parser.error("Speaker suggestions are available only in meeting mode")
+    if (args.suggest_speakers_llm or args.speaker_suggestion_model) and not args.suggest_speakers:
+        parser.error("LLM speaker review requires --suggest-speakers")
+    if args.speaker_suggestion_model and not args.suggest_speakers_llm:
+        parser.error("Speaker-review model override requires --suggest-speakers-llm")
     try:
         resolve_model_defaults(args)
     except ValueError as exc:
@@ -303,12 +315,22 @@ def main(default_profile: str | None = None) -> int:
                     "summary.md", "action-items.md", "minutes-draft.md",
                     "chunk_summaries.jsonl", "meeting_sections.jsonl",
                     "minutes-qa.md", "minutes-qa.json",
+                    PRIVATE_SUGGESTIONS_FILENAME,
                 ):
                     (summaries_dir / filename).unlink(missing_ok=True)
             if redaction_warnings:
                 write_report(summaries_dir, redaction_warnings)
                 print(f"[qa] {len(redaction_warnings)} spoken-redaction warning(s); see minutes-qa.md", flush=True)
             aliases = load_aliases(transcript_dir, args.speaker_aliases)
+            if args.suggest_speakers:
+                roster = load_roster(transcript_dir, args.speaker_roster)
+                speaker_chunks = speaker_input(chunks)
+                report = build_speaker_suggestions(speaker_chunks, aliases, roster, str(transcript_dir.resolve()))
+                write_private_json(summaries_dir / PRIVATE_SUGGESTIONS_FILENAME, report)
+                if args.suggest_speakers_llm:
+                    report = review_speakers(report, speaker_chunks, aliases, roster, ollama_url=args.ollama_url, model=args.speaker_suggestion_model or args.reduce_model, num_ctx=args.reduce_num_ctx, keep_alive=args.keep_alive)
+                    write_private_json(summaries_dir / PRIVATE_SUGGESTIONS_FILENAME, report)
+                    print(f"[speaker-review] Local LLM review: {report['llm_review']['status']}; advisory only", flush=True)
             chunks = prepare_chunks(redacted.chunks, aliases)
         except (OSError, ValueError, TypeError) as exc:
             print(f"ERROR: Meeting preparation failed: {exc}", file=sys.stderr)

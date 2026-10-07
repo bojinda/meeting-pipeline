@@ -536,6 +536,131 @@ python bin/ollama_meeting_summary.py meeting-transcripts/session-123
 To select another mapping file, pass `--speaker-aliases /path/to/names.json`.
 The mapping is a flat JSON object with plain, single-line names.
 
+### Optional speaker suggestions (private, advisory only)
+
+Meeting mode can suggest names from **non-redacted text evidence**. Enable it
+explicitly with `--suggest-speakers`; normal processing and Home Assistant
+commands retain their defaults. There are no voiceprints, speaker embeddings,
+biometric matching or cross-meeting identity stores. Heuristic mode makes no
+additional model calls. Only the explicit local LLM option adds a bounded call.
+Suggestions never modify or replace approved aliases and are never supplied to
+the map/reduce models. Approval remains the operator's decision.
+
+Operator workflow:
+
+1. Process the meeting with the optional suggestion stage:
+   ```bash
+   python bin/ollama_meeting_summary.py meeting-transcripts/session-123 --suggest-speakers
+   ```
+   Or generate suggestions without running Ollama:
+   ```bash
+   python bin/suggest_meeting_speakers.py suggest meeting-transcripts/session-123
+   ```
+2. Optionally review conversational context using local Ollama, without rerunning
+   WhisperX or the meeting map/reduce stages:
+   ```bash
+   python bin/suggest_meeting_speakers.py suggest meeting-transcripts/session-123 --llm
+   ```
+   Or add it to normal meeting processing explicitly:
+   ```bash
+   python bin/ollama_meeting_summary.py meeting-transcripts/session-123 --suggest-speakers --suggest-speakers-llm
+   ```
+3. Inspect `meeting-summaries/session-123/speaker-suggestions.json` privately.
+   Each unresolved visible `SPEAKER_XX` has a suggested name or `null`, a
+   confidence label, evidence excerpts/types/IDs, conflicting candidates, and
+   `origin` (`heuristic`, `llm`, or `both`). The private `llm_review` field records
+   status, sampled evidence, structured response, and validation issues.
+4. Verify identities, then approve/edit the existing per-meeting
+   `speaker_aliases.json`. The optional helper merges **only** explicitly selected,
+   unambiguous suggestions, never all suggestions:
+   ```bash
+   python bin/suggest_meeting_speakers.py approve meeting-transcripts/session-123 --approve SPEAKER_03
+   ```
+   Multiple `--approve` flags select multiple labels. It rejects a review from
+   another meeting or a changed visible transcript and cannot overwrite a
+   different existing approved alias.
+   The helper rechecks current source relationships and model evidence. Editing
+   JSON confidence/candidate/ambiguity fields cannot bypass that verification.
+   Low-confidence, ambiguous, or null suggestions require manual verification
+   and alias editing. Use the same `--speaker-roster` when reviewing/approving
+   with an explicitly selected roster.
+5. Rerun postprocessing using approved aliases:
+   ```bash
+   python bin/ollama_meeting_summary.py meeting-transcripts/session-123
+   ```
+
+Both commands use `MEETING_SUMMARIES_ROOT` when set. Standalone `suggest` also
+accepts `--output-dir`; `approve --suggestions /private/path/speaker-suggestions.json`
+selects a review there. Existing `--speaker-aliases` behavior remains supported.
+
+An optional per-meeting `speaker_roster.private.json` can supply preferred
+spellings, name variants, and roles:
+
+```json
+{"people": [{"name": "Taylor Morgan", "aliases": ["Taylor"], "role": "Chair"}]}
+```
+
+A list of names is also accepted. `--speaker-roster /private/path/speaker_roster.private.json`
+selects another private roster. **A roster or role alone never establishes an
+identity.** Only an evidenced name can match a roster candidate. Self-identification
+is high confidence; an introduction with an immediate response or repeated
+address/response patterns is medium; a single address/response is low. Conflicting
+names, ambiguous roster variants, or a name approved for another label produce
+`null` for human review. Role context is secondary and cannot raise confidence.
+These are heuristic review labels, not statistical probabilities.
+
+Discourse/courtesy prefixes are parsed before direct-address detection, so
+ordinary openings such as “Pardon, could you...” or “But, can you...” are not
+names. Adjacent same-speaker lines such as “Yeah, that's me.” followed immediately
+by “Taylor Morgan.” can support identity; intervening speakers, unrelated text,
+or redaction gaps prevent that joining. Strong self-identification does not
+establish identity for every occurrence of a diarization label. Conflicting
+address/self-identification evidence is retained with `suggested_name: null`;
+there is no automatic speaker splitting or correction.
+
+Local LLM review uses the existing `OLLAMA_URL` and meeting reduce-model/context
+defaults. `--speaker-suggestion-model MODEL` overrides only this review's model;
+standalone `--reduce-model`, `--reduce-num-ctx`, and `--ollama-url` also select
+settings explicitly. Source remains authoritative: names, labels, relationship
+types, and evidence IDs must be grounded in the supplied redacted snippets.
+Roster-only guesses, unrelated mentions, fabricated IDs, and unsupported names
+are rejected. Heuristic/model disagreement or explicit model uncertainty remains
+for manual review; a model cannot choose a winner in a diarization collision or
+replace an approved alias. Transcript text is untrusted data, never instructions.
+
+The stage makes at most one request per meeting, samples introductions, addresses,
+roles and representative turns across the entire meeting, and bounds the evidence
+packet to at most 60 windows/18,000 characters. Review context is bounded to
+4,096–32,768 tokens; generation is capped at 2,048 tokens, temperature zero, with
+a 120-second HTTP timeout and strict JSON validation. Public AI endpoints,
+redirects, environment HTTP proxies, and cloud-tagged models are not used;
+select an installed local model. No live model is required
+by the tests. Unavailable Ollama, timeout, or invalid JSON leaves safe heuristic
+results and an incomplete/unavailable status; normal meeting processing continues.
+
+Standalone LLM review uses `bin/with-gpu-lock.sh` for GPU1. The helper exposes a
+managed-lock ownership marker to its child so a speaker review inside an already
+locked meeting stage does not acquire GPU1 again. The existing lock paths,
+timeouts, signal/exit behavior, persistent files, and physical assignments stay
+the same. Heuristic-only review needs no GPU lock. For direct full processing,
+the existing cooperative wrapper can cover all model calls:
+```bash
+bash bin/with-gpu-lock.sh gpu1 "Meeting summaries" python bin/ollama_meeting_summary.py meeting-transcripts/session-123 --suggest-speakers --suggest-speakers-llm
+```
+
+Spoken redaction is applied before evidence lookup, including in the standalone
+helper. Address/response pairs involving redaction-affected source chunks are
+omitted conservatively; visible self-identifications can still be reviewed.
+A redaction-bearing rerun clears stale suggestion artifacts even when suggestions
+are disabled. Source transcripts and recordings are not edited by this stage.
+
+Suggestions, rosters, aliases, and private temporary writes are gitignored.
+Suggestion/approval writes use atomic replacement and owner-only `0600`
+permissions on POSIX; protect the private directory with filesystem ACLs on
+Windows. Custom roster/alias filenames must also remain private and gitignored.
+Speaker review files and links to them are explicitly denied by the shared
+publication/export boundary; the three public document names are unchanged.
+
 ### Normalization and meeting sections
 
 Known repairs include `Mack Yard`, `Mackyard`, and `Mac yard` → `Mac Yard`,

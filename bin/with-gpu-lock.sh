@@ -115,13 +115,20 @@ _aihub_gpu_lock_main() {
     fi
   fi
   echo "[gpu-lock] Acquired $aihub_label: $aihub_lock_file" >&2
+  # Preserve a private request pipe for asynchronous managed commands. Bash
+  # otherwise redirects their stdin to /dev/null when job control is disabled.
+  local aihub_input_fd
+  exec {aihub_input_fd}<&0
   (
     # Only the supervisor holds the lock. Descendants cannot accidentally
     # retain its file descriptor after the managed command exits.
     exec {aihub_fd}>&-
-    exec setsid --wait env --default-signal=INT,TERM -- "$@"
+    exec 0<&"$aihub_input_fd"
+    exec {aihub_input_fd}<&-
+    exec setsid --wait env --default-signal=INT,TERM -- AIHUB_GPU_LOCK_HELD_FILE="$aihub_lock_file" "$@"
   ) &
   aihub_job_pid=$!
+  exec {aihub_input_fd}<&-
   if wait "$aihub_job_pid"; then aihub_status=0; else aihub_status=$?; fi
   aihub_job_pid=""
   exit "$aihub_status"

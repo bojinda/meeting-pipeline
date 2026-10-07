@@ -6,20 +6,21 @@ import re
 import zipfile
 
 from .redaction import PRIVATE_REDACTION_FILENAME
+from .speaker_suggestions import PRIVATE_SUGGESTIONS_FILENAME, PRIVATE_ROSTER_FILENAME
 
 
 PUBLIC_MEETING_FILENAMES = ("summary.md", "action-items.md", "minutes-draft.md")
-PRIVATE_MEETING_FILENAMES = frozenset({PRIVATE_REDACTION_FILENAME.casefold()})
+PRIVATE_MEETING_FILENAMES = frozenset({PRIVATE_REDACTION_FILENAME.casefold(), PRIVATE_SUGGESTIONS_FILENAME.casefold(), PRIVATE_ROSTER_FILENAME.casefold(), "speaker_aliases.json"})
 
 
 def strip_private_references(content: str) -> str:
     """Do not publish links/attachments to the private review record either."""
-    private = re.escape(PRIVATE_REDACTION_FILENAME)
+    private = "(?:" + "|".join(re.escape(name) for name in sorted(PRIVATE_MEETING_FILENAMES)) + ")"
     content = re.sub(r"\[[^\]\n]*\]\([^\n)]*" + private + r"[^\n)]*\)", "", content, flags=re.IGNORECASE)
     content = re.sub(r"<a\b[^>]*" + private + r"[^>]*>.*?</a>", "", content, flags=re.IGNORECASE | re.DOTALL)
     # Also reject reference-link definitions, autolinks, and other embedded
     # filename references. A private-record reference must never be exported.
-    return "\n".join(line for line in content.splitlines() if PRIVATE_REDACTION_FILENAME.casefold() not in line.casefold())
+    return "\n".join(line for line in content.splitlines() if not any(name in line.casefold() for name in PRIVATE_MEETING_FILENAMES))
 
 
 def _public_content(path: Path) -> str:
@@ -28,6 +29,7 @@ def _public_content(path: Path) -> str:
 
 def public_meeting_files(directory: Path) -> list[Path]:
     files = []
+    private_files = [path for path in directory.iterdir() if path.name.casefold() in PRIVATE_MEETING_FILENAMES] if directory.is_dir() else []
     for name in PUBLIC_MEETING_FILENAMES:
         path = directory / name
         # Explicit private-name denial plus a positive filename allowlist. No
@@ -36,8 +38,7 @@ def public_meeting_files(directory: Path) -> list[Path]:
             continue
         if path.is_symlink() or any(part.casefold() in PRIVATE_MEETING_FILENAMES for part in path.resolve().parts):
             continue
-        private = directory / PRIVATE_REDACTION_FILENAME
-        if path.exists() and private.exists() and path.samefile(private):
+        if path.exists() and any(private.exists() and path.samefile(private) for private in private_files):
             continue
         if path.is_file():
             files.append(path)
@@ -51,7 +52,7 @@ def publication_payload(directory: Path) -> dict:
 def export_documents(directory: Path, destination: Path) -> list[Path]:
     files = public_meeting_files(directory)
     if any(part.casefold() in PRIVATE_MEETING_FILENAMES for part in destination.parts):
-        raise ValueError("Export destination cannot be a private redaction path")
+            raise ValueError("Export destination cannot be a private review path")
     if directory.resolve() == destination.resolve():
         raise ValueError("Export destination must differ from the private processing directory")
     destination.mkdir(parents=True, exist_ok=True)
@@ -67,7 +68,7 @@ def export_documents(directory: Path, destination: Path) -> list[Path]:
 
 def export_archive(directory: Path, destination: Path) -> None:
     if any(part.casefold() in PRIVATE_MEETING_FILENAMES for part in destination.parts) or destination.is_symlink():
-        raise ValueError("Archive destination cannot be a private redaction path or symbolic link")
+        raise ValueError("Archive destination cannot be a private review path or symbolic link")
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in public_meeting_files(directory):
             archive.writestr(path.name, _public_content(path).rstrip() + "\n")

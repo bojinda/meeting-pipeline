@@ -18,6 +18,12 @@ tests/private-identifiers.txt
 redactions.json
 .private-redactions-*.tmp
 
+# Private per-meeting speaker review and roster; no automatic identities
+speaker-suggestions.json
+speaker_roster.private.json
+speaker_aliases.json
+.private-speaker-*.tmp
+
 # Python
 __pycache__/
 *.pyc
@@ -33,6 +39,7 @@ Thumbs.db
 .vscode/
 
 # Runtime outputs
+/ignore/
 meeting-recordings/
 meeting-transcripts/
 meeting-summaries/

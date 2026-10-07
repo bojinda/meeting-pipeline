@@ -97,6 +97,45 @@ class NormalizationTests(unittest.TestCase):
 
 
 class SectionTests(unittest.TestCase):
+    def test_natural_chair_opening_and_historical_recap_preserve_phase_sequence(self):
+        for opening in ("Okay guys, I think we'll get started here.", "I think we'll get started here.", "Okay, we'll get started.", "Alright, let's get the meeting started."):
+            for recap in ("I'll start with the recap last month.", "I'll start with last month's recap.", "I will start with the recap from the previous week.", "I’ll start with the previous month’s recap."):
+                with self.subTest(opening=opening, recap=recap):
+                    turns = [
+                        "[Morgan] Our vacation plans need a booking.",
+                        "[Chair] " + opening,
+                        "[Chair] " + recap,
+                        "[Chair] So for April, Taylor reported staffing concerns.",
+                        "[Chair] The old schedule was reviewed.",
+                        "[Chair] Moving right along. The current schedule needs approval.",
+                    ]
+                    rows = prepare_chunks([chunk(text, index) for index, text in enumerate(turns, 1)], {})
+                    self.assertEqual([row["meeting_section"] for row in rows], [PRE_MEETING, BUSINESS, RECAP, RECAP, RECAP, BUSINESS])
+                    self.assertEqual([row["text"] for row in rows[:5]], turns[:5])
+                    merged = prepare_chunks([chunk("\n".join(turns))], {})
+                    self.assertEqual([row["meeting_section"] for row in merged], [PRE_MEETING, BUSINESS, RECAP, BUSINESS])
+
+    def test_first_person_and_collective_agenda_openers_are_formal_starts(self):
+        for opening in ("We'll start with the agenda.", "Let's start with the reports.", "I'll start with the agenda.", "I will start off with our first report."):
+            with self.subTest(opening=opening):
+                rows = prepare_chunks([chunk("[Morgan] Personal discussion.\n[Chair] " + opening)], {})
+                self.assertEqual([row["meeting_section"] for row in rows], [PRE_MEETING, BUSINESS])
+
+    def test_natural_task_start_variants_do_not_create_meeting_boundaries(self):
+        for text in ("Okay guys, I think we'll get started on the next project.", "I think we'll get started here on the investigation.", "Alright, let's get started with the equipment check.", "I'll start with the report formatting."):
+            with self.subTest(text=text):
+                rows = prepare_chunks([chunk("[Chair] The budget is approved.\n[Morgan] " + text)], {})
+                self.assertEqual([row["meeting_section"] for row in rows], [BUSINESS])
+
+    def test_month_report_intro_is_historical_only_while_recap_is_pending(self):
+        intro = "[Chair] So for April, Taylor reported staffing concerns."
+        rows = prepare_chunks([chunk(intro)], {})
+        self.assertEqual([row["meeting_section"] for row in rows], [BUSINESS])
+        source = "[Chair] I'll start with last month's recap.\n[Morgan] The equipment needs repair.\n" + intro
+        rows = prepare_chunks([chunk(source)], {})
+        self.assertEqual([row["meeting_section"] for row in rows], [RECAP, BUSINESS])
+        self.assertIn(intro, rows[-1]["text"])
+
     def test_asr_fillers_preserve_opening_interruption_and_recap_resumption(self):
         turns = json.loads((ROOT / "tests" / "fixtures" / "asr_opening_recap_resumption.json").read_text(encoding="utf-8"))["turns"]
         source = [chunk(f"[{turn['speaker']}] {turn['text']}", index) for index, turn in enumerate(turns, 1)]
@@ -614,6 +653,31 @@ class PipelineTests(unittest.TestCase):
             status = engine.main(default_profile=default_profile)
         self.assertEqual(index.read_text(encoding="utf-8"), original)
         return status, calls, root / "outputs" / transcript.name
+
+    def test_natural_opening_filters_chatter_and_keeps_historical_recap_separate(self):
+        source = ("[Morgan] I'll contact the cafe about PRE_CHATTER_SENTINEL vacation plans.\n"
+                  "[Chair] Okay guys, I think we'll get started here.\n"
+                  "[Chair] I'll start with the recap last month.\n"
+                  "[Chair] So for April, Taylor reported HISTORICAL_REPORT_SENTINEL staffing concerns.\n"
+                  "[Chair] The old schedule was reviewed.\n"
+                  "[Chair] Moving right along. CURRENT_BUSINESS_SENTINEL needs approval.")
+        for keep_recap in (False, True):
+            with self.subTest(keep_recap=keep_recap), tempfile.TemporaryDirectory() as directory:
+                status, calls, output = self.run_pipeline(Path(directory), source, ["--keep-recap"] if keep_recap else [], reduce_echo=True)
+                self.assertEqual(status, 0)
+                self.assertEqual([row["meeting_section"] for row in engine.load_jsonl(output / "meeting_sections.jsonl")], [PRE_MEETING, BUSINESS, RECAP, BUSINESS])
+                for call in calls:
+                    if "Transcript chunk:\n" not in call["prompt"]:
+                        self.assertNotIn("PRE_CHATTER_SENTINEL", call["prompt"])
+                for instruction in ("write an action-items document", "write formal draft minutes"):
+                    prompt = next(call["prompt"] for call in calls if instruction in call["prompt"])
+                    self.assertNotIn("HISTORICAL_REPORT_SENTINEL", prompt)
+                    self.assertIn("CURRENT_BUSINESS_SENTINEL", prompt)
+                for filename in ("summary.md", "action-items.md", "minutes-draft.md"):
+                    self.assertNotIn("PRE_CHATTER_SENTINEL", (output / filename).read_text(encoding="utf-8"))
+                minutes = (output / "minutes-draft.md").read_text(encoding="utf-8")
+                self.assertEqual("HISTORICAL_REPORT_SENTINEL" in minutes, keep_recap)
+                self.assertEqual("Recap of Previous Meeting" in minutes, keep_recap)
 
     def test_summary_adjournment_outcome_synonym_is_cleaned_in_final_markdown(self):
         source = "[Chair] Let's get started. Motion to adjourn. Moved by Taylor, seconded by Casey. The meeting is adjourned."

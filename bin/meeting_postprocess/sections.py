@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from calendar import month_name
 from dataclasses import dataclass
 
 from .normalization import prepare_text
@@ -15,12 +16,13 @@ ADJOURNMENT = "adjournment"
 _DISCOURSE = r"(?:okay|ok|yeah|yes|so|now|well|all right|alright|uh|um|oh)"
 _LEAD_IN = r"^(?:" + _DISCOURSE + r"[,.]?\s+)*"
 _FORMAL_START = re.compile(
-    _LEAD_IN + r"(?:(?:i (?:guess|think)|i suppose)\s+)?(?:"
+    _LEAD_IN + r"(?:(?:guys|everybody|everyone|folks)[,.]?\s+)?"
+    r"(?:(?:i (?:guess|think)|i suppose)\s+)?(?:"
     r"(?:i(?:['’]ll| will)? )?call (?:this |the )?meeting to order|"
     r"(?:the |this )?meeting (?:is|has been) called to order|"
     r"(?:let['’]s|let us|we(?:['’]ll| will| can| shall)) "
     r"(?:get (?:the |this )?meeting started\b|(?:begin|start) (?:the |this )?meeting\b|"
-    r"get started(?: (?:there|then|now))?[.!?]*$))",
+    r"get started(?: (?:here|there|then|now))?[.!?]*$))",
     re.IGNORECASE,
 )
 _READY_PREFIX = (
@@ -28,9 +30,9 @@ _READY_PREFIX = (
     r"(?:are\s+)?(?:you\s+)?all set(?: here| to (?:start|begin)(?: the meeting)?)?"
 )
 _CHAIR_READY = re.compile(_READY_PREFIX + r"[.!?]*$", re.IGNORECASE)
-_START_CONSTRUCTION = r"(?:(?:let['’]s|let us|we(?:['’]ll| will| can| shall))\s+)?start (?:off )?with "
+_START_CONSTRUCTION = r"(?:(?:let['’]s|let us|i(?:['’]ll| will)|we(?:['’]ll| will| can| shall))\s+)?start (?:off )?with "
 _CHAIR_START_PREFIX = _LEAD_IN + _START_CONSTRUCTION
-_OPENING_OBJECT = r"(?:a |the |our )?(?:recap|agenda|roll call|minutes|introductions|reports|first (?:report|item))\b"
+_OPENING_OBJECT = r"(?:a |the |our )?(?:(?:(?:last|previous) (?:month|week)['’]s )?recap|agenda|roll call|minutes|introductions|reports|first (?:report|item))\b"
 _CHAIR_AGENDA_START = re.compile(
     _CHAIR_START_PREFIX + _OPENING_OBJECT,
     re.IGNORECASE,
@@ -70,12 +72,16 @@ _RETROSPECTIVE = re.compile(
     re.IGNORECASE,
 )
 _RECAP_INTENT = re.compile(
-    _CHAIR_START_PREFIX + r"(?:a |the |our )?(?:little |brief )?recap(?: of " + _PREVIOUS_MEETING + r")?[.!?]*$",
+    _CHAIR_START_PREFIX + r"(?:a |the |our )?(?:little |brief )?"
+    r"(?:(?:last|previous) (?:month|week)['’]s recap|recap(?: of " + _PREVIOUS_MEETING +
+    r"|(?: (?:of|from))? (?:the )?(?:last|previous) (?:month|week))?)[.!?]*$",
     re.IGNORECASE,
 )
 _HISTORICAL_REPORT = re.compile(
     _LEAD_IN + r"(?:we|i|they|[A-Z][\w'’.-]*(?:\s+[A-Z][\w'’.-]*){0,2})\s+"
-    r"(?:discussed|reported|approved|agreed|decided|reviewed|noted|raised)\b",
+    r"(?:discussed|reported|approved|agreed|decided|reviewed|noted|raised)\b|" +
+    _LEAD_IN + r"for (?:the )?(?:(?:last|previous) (?:month|week)|" +
+    "|".join(month_name[1:]) + r")\b",
     re.IGNORECASE,
 )
 _CURRENT_DISCUSSION = re.compile(
