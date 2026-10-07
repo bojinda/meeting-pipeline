@@ -451,7 +451,8 @@ class LocalLockTests(unittest.TestCase):
             review._http_call(self.request())
             args, kwargs = builder.return_value.open.call_args
             data = json.loads(args[0].data)
-            self.assertEqual((data["format"], data["stream"], data["options"]["temperature"]), ("json", False, 0))
+            self.assertEqual((data["format"], data["stream"], data["options"]["temperature"]), (review.RESPONSE_SCHEMA, False, 0))
+            self.assertFalse(data["think"])
             self.assertEqual(kwargs["timeout"], 120)
             self.assertLessEqual(data["options"]["num_predict"], 2048)
             self.assertIn("UNTRUSTED DATA", data["system"])

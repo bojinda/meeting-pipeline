@@ -29,6 +29,7 @@ _RESPONSE = re.compile(r"^(?:yes|yeah|sure|okay|ok|agreed|thanks|thank you|hello
 _BROAD_RESPONSE = re.compile(r"^(?:i\b|i['’]|we\b|we['’]|the (?:claim|report|issue|grievance)\b)", re.IGNORECASE)
 _DENIAL = re.compile(r"\b(?:not me|not here|isn['’]t here|i am not|i['’]m not|no[,!.])", re.IGNORECASE)
 _FRAGMENT = re.compile(r"^(?:that['’]s me|that is me)[.!]?$", re.IGNORECASE)
+_IDENTITY_QUESTION = re.compile(r"^(?:who(?:['’]s| is) (?:that|speaking)|what(?:['’]s| is) your name)\s*\?", re.IGNORECASE)
 _NON_NAMES = {"the", "a", "i", "we", "you", "they", "yes", "no", "okay", "good", "really", "tired", "ready", "sorry", "going", "gonna", "here", "back", "available", "chair", "president", "member", "engineer", "conductor", "unknown"}
 
 
@@ -122,17 +123,23 @@ def grounding_events(groups: list[dict], approved: dict, roster: list[dict], bro
         known.extend([person["name"], person["name"].split()[0], *person["aliases"]])
     patterns = _patterns(known)
     attested = []
+    prior_identities = {}
     for group in groups:
+        found = []
         for sentence in _sentences(group["text"]):
             for pattern in patterns[:2]:
                 match = pattern.search(sentence)
                 if match:
-                    attested.append(match["name"].strip(" ."))
+                    if pattern is patterns[0] and re.match(r"this is\b", match[0], re.IGNORECASE) and not re.match(r"\s+(?:speaking|here)\b", sentence[match.end():], re.IGNORECASE):
+                        continue
+                    found.append(match["name"].strip(" ."))
         if group["safe_pair"]:
             for first, second in zip(group["lines"], group["lines"][1:]):
                 match = patterns[4].fullmatch(second.strip())
                 if _FRAGMENT.fullmatch(_DISCOURSE.sub("", first.strip())) and match:
-                    attested.append(match["name"].strip(" ."))
+                    found.append(match["name"].strip(" ."))
+        prior_identities[group["position"]] = found
+        attested.extend(found)
     patterns = _patterns(known + attested)
 
     def resolve(spoken: str) -> list[str]:
@@ -146,10 +153,12 @@ def grounding_events(groups: list[dict], approved: dict, roster: list[dict], bro
         return [name]
 
     events = []
-    def add(group: dict, spoken: str, kind: str, anchors: dict[str, str], strength: str) -> None:
+    def add(group: dict, spoken: str, kind: str, anchors: dict[str, str], strength: str, uncertain: bool = False) -> None:
         names = resolve(spoken)
+        sentences = _sentences(group["text"])
+        uncertain = uncertain or bool(re.search(r"\[SPEAKER_\d+\]", group["text"])) or len(sentences) > 1 and any(_IDENTITY_QUESTION.match(sentence) for sentence in sentences)
         if names and SPEAKER_LABEL.fullmatch(group["speaker_label"]) and group["speaker_label"] not in approved:
-            events.append({"speaker_label": group["speaker_label"], "candidate_names": names, "type": kind, "evidence_ids": list(anchors), "anchors": anchors, "confidence": strength, "origin": "heuristic"})
+            events.append({"speaker_label": group["speaker_label"], "candidate_names": names, "type": kind, "evidence_ids": list(anchors), "anchors": anchors, "confidence": strength, "origin": "heuristic", "uncertain_source_attribution": uncertain})
 
     for index, group in enumerate(groups):
         for sentence in _sentences(group["text"]):
@@ -164,6 +173,14 @@ def grounding_events(groups: list[dict], approved: dict, roster: list[dict], bro
                 name = patterns[4].fullmatch(second.strip())
                 if _FRAGMENT.fullmatch(_DISCOURSE.sub("", first.strip())) and name:
                     add(group, name["name"], "fragmented_self_identification", {group["id"]: first + "\n" + second}, "high")
+            # ASR may merge an exchange and a fragmented identity into one line.
+            # Retain the possible identity, but the label's attribution needs review.
+            for line in group["lines"]:
+                sentences = re.split(r"(?<=[.!?])\s+", line)
+                for first, second in zip(sentences, sentences[1:]):
+                    name = patterns[4].fullmatch(second.strip())
+                    if _FRAGMENT.fullmatch(_DISCOURSE.sub("", first.strip())) and name:
+                        add(group, name["name"], "fragmented_self_identification", {group["id"]: first + " " + second}, "low", uncertain=True)
         if index + 1 >= len(groups):
             continue
         response = groups[index + 1]
@@ -177,6 +194,10 @@ def grounding_events(groups: list[dict], approved: dict, roster: list[dict], bro
             for pattern, kind in ((patterns[1], "introduction"), (patterns[2], "direct_address_response"), (patterns[5], "direct_address_response"), *(([(patterns[3], "invited_speaker")] if broad else []))):
                 match = pattern.search(sentence)
                 if match:
+                    if kind == "direct_address_response" and re.fullmatch(r"\s*\?\s*", sentence[match.end("name"):]):
+                        independent = known + [name for position, names in prior_identities.items() if position < group["position"] for name in names]
+                        if match["name"].casefold() not in {form.casefold() for name in independent for form in (name, name.split()[0])}:
+                            continue
                     cues.append((match, kind))
         if cues:
             match, kind = cues[-1]
@@ -191,6 +212,8 @@ def summarize_events(groups: list[dict], events: list[dict], approved: dict) -> 
         items = [event for event in events if event["speaker_label"] == label]
         names = list(dict.fromkeys(name for item in items for name in item["candidate_names"]))
         conflicts = []
+        if any(item.get("uncertain_source_attribution") for item in items):
+            conflicts.append("Identity occurs inside a merged ASR exchange; source attribution requires explicit manual review")
         if len(names) > 1:
             conflicts.append("Conflicting identities on this diarization label; explicit manual review required")
         if any(name.casefold() in {value.casefold() for value in approved.values()} for name in names):
@@ -208,7 +231,7 @@ def summarize_events(groups: list[dict], events: list[dict], approved: dict) -> 
             if best not in retained:
                 retained.append(best)
         retained.extend(item for item in items if item not in retained)
-        result.append({"speaker_label": label, "suggested_name": names[0] if len(names) == 1 and not conflicts else None, "confidence": confidence if not conflicts else "unknown", "evidence_types": sorted({item["type"] for item in items}), "evidence": [{"type": item["type"], "candidate_names": item["candidate_names"], "evidence_ids": item["evidence_ids"], "excerpts": [text[:240] for text in item["anchors"].values()], "origin": item["origin"]} for item in retained[:16]], "candidates": names, "conflicting_candidates": names if conflicts else [], "ambiguity": conflicts, "origin": "both" if len(origins) > 1 else next(iter(origins), "heuristic"), "requires_manual_review": True})
+        result.append({"speaker_label": label, "suggested_name": names[0] if len(names) == 1 and not conflicts else None, "confidence": confidence if not conflicts else "unknown", "evidence_types": sorted({item["type"] for item in items}), "evidence": [{"type": item["type"], "candidate_names": item["candidate_names"], "evidence_ids": item["evidence_ids"], "excerpts": [text[:240] for text in item["anchors"].values()], "origin": item["origin"], "uncertain_source_attribution": item.get("uncertain_source_attribution", False)} for item in retained[:16]], "candidates": names, "conflicting_candidates": names if conflicts else [], "ambiguity": conflicts, "origin": "both" if len(origins) > 1 else next(iter(origins), "heuristic"), "requires_manual_review": True})
     for row in result:
         if row["suggested_name"] and any(row["suggested_name"] in other["candidates"] for other in result if other is not row):
             row["ambiguity"].append("Candidate appears on another diarization label; verify manually")

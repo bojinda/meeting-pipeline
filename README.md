@@ -611,32 +611,57 @@ These are heuristic review labels, not statistical probabilities.
 
 Discourse/courtesy prefixes are parsed before direct-address detection, so
 ordinary openings such as “Pardon, could you...” or “But, can you...” are not
-names. Adjacent same-speaker lines such as “Yeah, that's me.” followed immediately
+names. A bare question such as “Taylor?” requires a private roster match or an
+earlier independent identity cue. Adjacent same-speaker lines such as “Yeah, that's me.” followed immediately
 by “Taylor Morgan.” can support identity; intervening speakers, unrelated text,
 or redaction gaps prevent that joining. Strong self-identification does not
 establish identity for every occurrence of a diarization label. Conflicting
 address/self-identification evidence is retained with `suggested_name: null`;
 there is no automatic speaker splitting or correction.
+The standalone command reads `chunks_out/transcript_chunks.jsonl`. Its chunker
+can join multiple ASR segments into one line, unlike a turn-per-line text export.
+A fragmented self-identification within a merged exchange is retained as
+uncertain source attribution and cannot be approved through the helper, even
+without a competing name. Compare the session index when checking production
+candidate counts; the text export may have different grouping.
 
 Local LLM review uses the existing `OLLAMA_URL` and meeting reduce-model/context
 defaults. `--speaker-suggestion-model MODEL` overrides only this review's model;
 standalone `--reduce-model`, `--reduce-num-ctx`, and `--ollama-url` also select
 settings explicitly. Source remains authoritative: names, labels, relationship
 types, and evidence IDs must be grounded in the supplied redacted snippets.
-Roster-only guesses, unrelated mentions, fabricated IDs, and unsupported names
-are rejected. Heuristic/model disagreement or explicit model uncertainty remains
+Roster-only guesses, fabricated IDs, and invented names are rejected. A model
+candidate whose name appears in cited transcript evidence but whose relationship
+cannot be independently grounded is kept privately under `unverified_leads`,
+with evidence IDs and `approvable: false`. This includes possible relationships
+and unrelated mentions needing human interpretation; neither becomes a verified
+candidate. Fresh approval checks repeat grounding from the current source.
+Heuristic/model disagreement or explicit model uncertainty remains
 for manual review; a model cannot choose a winner in a diarization collision or
 replace an approved alias. Transcript text is untrusted data, never instructions.
 
 The stage makes at most one request per meeting, samples introductions, addresses,
 roles and representative turns across the entire meeting, and bounds the evidence
 packet to at most 60 windows/18,000 characters. Review context is bounded to
-4,096–32,768 tokens; generation is capped at 2,048 tokens, temperature zero, with
-a 120-second HTTP timeout and strict JSON validation. Public AI endpoints,
+4,096–32,768 tokens; generation is bounded to one quarter of that context
+(at most 8,192 tokens), temperature zero, with a 120-second HTTP timeout.
+The request supplies an explicit [Ollama JSON schema](https://docs.ollama.com/capabilities/structured-outputs)
+and validates the generated JSON locally. Speaker review disables model thinking
+by default; set `SPEAKER_REVIEW_THINK=true` to request it, or `default` to omit
+that option for a model that requires its own default. This setting affects only
+speaker review and never adds a retry or another inference call. Public AI endpoints,
 redirects, environment HTTP proxies, and cloud-tagged models are not used;
 select an installed local model. No live model is required
 by the tests. Unavailable Ollama, timeout, or invalid JSON leaves safe heuristic
 results and an incomplete/unavailable status; normal meeting processing continues.
+Private `llm_review.diagnostics` records a failure category, generated-output
+character count, `done_reason` when supplied by Ollama, token/thinking-length
+counts when available, and validation error categories. It distinguishes empty
+or malformed generated JSON, invalid schema, generation token limits, HTTP/model/
+transport failures, and grounding failures. Raw malformed responses, thinking
+text, and error bodies are discarded; neither model responses nor transcript
+evidence are printed in public logs. Earlier reports with only
+`invalid_json_or_schema` lack enough metadata to identify the original cause.
 
 Standalone LLM review uses `bin/with-gpu-lock.sh` for GPU1. The helper exposes a
 managed-lock ownership marker to its child so a speaker review inside an already
