@@ -406,6 +406,102 @@ class TwoPassTests(unittest.TestCase):
             self.assertEqual(request["num_predict"], 16384)
             self.assertLessEqual(review._cost(request["prompt"], request["system"], request["format"], counter, request["num_predict"]), request["num_ctx"])
 
+    def test_rejected_names_have_safe_field_specific_diagnostics(self):
+        for field in ("name", "conflicting_names"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as root:
+                _, report, rows = self.setup_review(root)
+                target = rows[1]["turn_id"]
+                row = claim(target, "Taylor Morgan")
+                if field == "name":
+                    row[field] = "**PRIVATE_DIAGNOSTIC_NAME**"
+                else:
+                    row[field] = ["SPEAKER_99"]
+                model = Mock(return_value=json.dumps({"candidates": [row]}))
+                result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(), call=model)
+                model.assert_called_once()
+                diagnostics = result["llm_review"]["passes"][0]["diagnostics"]
+                self.assertEqual(diagnostics["rejected_candidates"], [{"candidate_index": 0, "field": field, "rejection_category": "invalid_name", "turn_id": target}])
+                encoded = json.dumps(diagnostics)
+                for private in ("Taylor Morgan", "PRIVATE_DIAGNOSTIC_NAME", "My name is", "SPEAKER_99"):
+                    self.assertNotIn(private, encoded)
+
+    def test_independent_valid_candidate_reaches_verification_but_review_stays_partial(self):
+        text = "[SPEAKER_03] My name is Taylor Morgan.\n[SPEAKER_04] My name is Casey."
+        with tempfile.TemporaryDirectory() as root:
+            directory, report, rows = self.setup_review(root, text)
+            valid = claim(rows[0]["turn_id"], "Taylor Morgan")
+            invalid = claim(rows[1]["turn_id"], "SPEAKER_04")
+            verified = claim(rows[0]["turn_id"], "Taylor Morgan", verification=True)
+            model = Mock(side_effect=[json.dumps({"candidates": [invalid, valid]}), json.dumps({"candidates": [verified]})])
+            result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(), call=model)
+            self.assertEqual(model.call_count, 2)
+            info = result["llm_review"]
+            self.assertEqual(info["status"], "incomplete")
+            self.assertEqual(info["reason"], "partial_discovery_validation")
+            self.assertEqual(len(info["assignments"]), 1)
+            self.assertEqual(info["assignments"][0]["suggested_name"], "Taylor Morgan")
+            self.assertFalse(info["assignments"][0]["auto_approvable"])
+            self.assertTrue(info["assignments"][0]["requires_explicit_approval"])
+            proposed = json.loads(model.call_args_list[1].args[0]["prompt"])["proposed_assignments"]
+            self.assertEqual([row["name"] for row in proposed], ["Taylor Morgan"])
+            self.assertEqual(result["suggestions"], report["suggestions"])
+            self.assertFalse((directory / "speaker_aliases.json").exists())
+            self.assertFalse((directory / turns.CORRECTIONS_FILE).exists())
+
+    def test_rejected_candidate_dependencies_keep_discovery_fail_closed(self):
+        cases = ("same_label", "overlap", "unknown_reference", "rejected_conflict", "valid_conflict", "description_link", "label_link", "source_conflict", "event_link", "empty_evidence", "same_identity")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as root:
+                text = "[SPEAKER_03] My name is Taylor Morgan.\n[SPEAKER_04] My name is Casey."
+                if case == "same_label":
+                    text = text.replace("SPEAKER_04", "SPEAKER_03")
+                if case == "same_identity":
+                    text = text.replace("My name is Casey.", "My name is Taylor Morgan.")
+                if case == "source_conflict":
+                    text += "\n[SPEAKER_03] My name is Riley."
+                if case == "event_link":
+                    text += "\n[SPEAKER_04] Taylor, could you give the report?\n[SPEAKER_03] Yes, I'll check."
+                directory, report, rows = self.setup_review(root, text)
+                valid = claim(rows[0]["turn_id"], "Taylor Morgan")
+                invalid = claim(rows[1]["turn_id"], "SPEAKER_04")
+                if case == "overlap":
+                    invalid["evidence_turn_ids"].append(rows[0]["turn_id"])
+                if case == "unknown_reference":
+                    invalid["evidence_turn_ids"].append("Tmissing")
+                if case == "empty_evidence":
+                    invalid["evidence_turn_ids"] = []
+                if case == "rejected_conflict":
+                    invalid["conflicting_names"] = ["Casey"]
+                if case == "valid_conflict":
+                    valid["conflicting_names"] = ["Casey"]
+                    valid["evidence_turn_ids"].append(rows[1]["turn_id"])
+                if case == "description_link":
+                    invalid["name"] = "**Taylor / Casey**"
+                if case == "label_link":
+                    invalid["name"] = "SPEAKER_03"
+                model = Mock(return_value=json.dumps({"candidates": [valid, invalid]}))
+                result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(), call=model)
+                model.assert_called_once()
+                self.assertEqual(result["llm_review"]["status"], "incomplete")
+                self.assertEqual(result["llm_review"]["assignments"], [])
+                self.assertFalse((directory / turns.CORRECTIONS_FILE).exists())
+
+    def test_partial_verification_cannot_hide_rejected_same_label_identity(self):
+        text = "[SPEAKER_03] My name is Taylor Morgan.\n[SPEAKER_04] My name is Casey."
+        for shared in (False, True):
+            with self.subTest(shared=shared), tempfile.TemporaryDirectory() as root:
+                _, report, rows = self.setup_review(root, text)
+                proposed = claim(rows[0]["turn_id"], "Taylor Morgan")
+                verified = claim(rows[0]["turn_id"], "Taylor Morgan", verification=True)
+                invalid = claim(rows[0 if shared else 1]["turn_id"], "SPEAKER_04", verification=True)
+                model = Mock(side_effect=[json.dumps({"candidates": [proposed]}), json.dumps({"candidates": [verified, invalid]})])
+                result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(), call=model)
+                self.assertEqual(model.call_count, 2)
+                info = result["llm_review"]
+                self.assertEqual(info["status"], "incomplete")
+                self.assertEqual(info["assignments"][0]["suggested_name"], None if shared else "Taylor Morgan")
+                self.assertFalse(info["assignments"][0]["auto_approvable"])
+
     def test_context_env_and_cli_override_only_speaker_review(self):
         with patch.dict(os.environ, {"SPEAKER_REVIEW_NUM_CTX": "65536", "MEETING_REDUCE_NUM_CTX": "32768"}, clear=True):
             self.assertEqual(review.settings()["num_ctx"], 65536)

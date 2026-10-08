@@ -740,7 +740,16 @@ Private per-pass `llm_review.passes[].diagnostics` (or legacy
 character count, `done_reason` when supplied by Ollama, token/thinking-length
 counts when available, and validation error categories. It distinguishes empty
 or malformed generated JSON, invalid schema, generation token limits, HTTP/model/
-transport failures, and grounding failures. Raw malformed responses, thinking
+transport failures, and grounding failures. Rejected candidates include a
+zero-based index, offending field, rejection category and valid target turn ID;
+these diagnostics never contain rejected names or transcript excerpts.
+A name-validation rejection can be quarantined only when remaining candidates
+are source-grounded and demonstrably independent of its labels, evidence and
+conflicts. Shared labels, overlapping or linked evidence, unresolved conflicts,
+and unverifiable dependencies remain fail-closed. Verification may proceed for
+independent candidates, but any rejection keeps the overall review incomplete.
+Suggestions remain advisory and require explicit operator approval.
+Raw malformed responses, thinking
 text, and error bodies are discarded; neither model responses nor transcript
 evidence are printed in public logs. Earlier reports with only
 `invalid_json_or_schema` lack enough metadata to identify the original cause.
