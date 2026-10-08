@@ -33,7 +33,7 @@ using its relevant evidence IDs. Do not duplicate candidate proposals or emit a
 candidate for every routine turn. Preserve conflicting evidence as conflicts;
 never discard uncertainty or weaken grounding to shorten the answer.
 """
-VERIFY_SYSTEM = SYSTEM + "\nIndependently verify each proposed assignment against source evidence. Ignore discovery confidence. Return supported, unsupported, or uncertain; do not choose a winner in a conflict."
+VERIFY_SYSTEM = SYSTEM + "\nIndependently verify each proposed assignment against source evidence. Ignore discovery confidence. Return supported, unsupported, or uncertain; do not choose a winner in a conflict. Use concise structured records with exact source turn IDs, no prose or duplicates."
 FIELDS = {
     "turn_id": {"type": "string"}, "name": {"type": ["string", "null"], "maxLength": 120},
     "confidence": {"type": "string", "enum": ["high", "medium", "low", "unknown"]},
@@ -343,7 +343,7 @@ def run_two_pass(report, turns, aliases, roster, *, model, ollama_url, options, 
         locations = {i for i, row in enumerate(turns) if row["turn_id"] in wanted}
         positions = {j for i in locations for j in (i - 1, i, i + 1) if 0 <= j < len(turns)}
         focus = [row for i, row in enumerate(turns) if i in positions]
-        verify_output = min(4096, max(1024, len(proposals) * 128))
+        verify_output = min(8192, max(4096, len(proposals) * 384))
         if _cost(_prompt(focus, roster, proposals), VERIFY_SYSTEM, schema(True), counter, verify_output) > context:
             info.update(reason="verification_budget_exceeded")
             info["verification_coverage"] = {"complete": False, "requested_turn_ids": [row["turn_id"] for row in focus]}

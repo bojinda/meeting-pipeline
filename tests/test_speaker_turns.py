@@ -329,7 +329,7 @@ class TwoPassTests(unittest.TestCase):
             discovery, verification = [call.args[0] for call in model.call_args_list]
             self.assertEqual(discovery["num_ctx"], 98304)
             self.assertEqual(discovery["num_predict"], 16384)
-            self.assertLessEqual(verification["num_predict"], 4096)
+            self.assertEqual(verification["num_predict"], 4096)
             self.assertLess(verification["num_ctx"], 98304)
             self.assertIn("Independently verify", verification["system"])
             proposed = json.loads(verification["prompt"])["proposed_assignments"]
@@ -501,6 +501,63 @@ class TwoPassTests(unittest.TestCase):
                 self.assertEqual(info["status"], "incomplete")
                 self.assertEqual(info["assignments"][0]["suggested_name"], None if shared else "Taylor Morgan")
                 self.assertFalse(info["assignments"][0]["auto_approvable"])
+
+    def test_verification_allowance_scales_for_many_source_grounded_candidates(self):
+        for count, expected in ((15, 5760), (24, 8192)):
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as root:
+                text = "\n".join(f"[SPEAKER_{i:02d}] My name is " + ("Taylor Morgan." if i % 2 else "Casey Riley.") for i in range(count))
+                _, report, rows = self.setup_review(root, text)
+                candidates = [claim(row["turn_id"], "Taylor Morgan" if i % 2 else "Casey Riley") for i, row in enumerate(rows)]
+                model = Mock(side_effect=[json.dumps({"candidates": candidates}), json.dumps({"candidates": [{**row, "verdict": "supported"} for row in candidates]})])
+                result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(98304), call=model)
+                self.assertEqual(model.call_count, 2)
+                discovery, verification = [call.args[0] for call in model.call_args_list]
+                self.assertEqual(discovery["num_ctx"], 98304)
+                self.assertEqual(discovery["num_predict"], 16384)
+                self.assertEqual(verification["num_predict"], expected)
+                self.assertLessEqual(review._cost(verification["prompt"], verification["system"], verification["format"], review.TokenCounter(), expected), verification["num_ctx"])
+                self.assertEqual(result["llm_review"]["status"], "completed")
+                self.assertEqual(len(result["llm_review"]["assignments"]), count)
+                self.assertTrue(all(row["suggested_name"] and not row["auto_approvable"] for row in result["llm_review"]["assignments"]))
+
+    def test_verification_reserves_entire_allowance_before_calling_model(self):
+        with tempfile.TemporaryDirectory() as root:
+            text = "\n".join(f"[SPEAKER_{i:02d}] My name is Taylor Morgan." for i in range(15))
+            _, report, rows = self.setup_review(root, text)
+            candidates = [claim(row["turn_id"], "Taylor Morgan") for row in rows]
+            class Counter:
+                method = "synthetic_token_counter"
+                def __call__(self, text):
+                    if '"proposed_assignments"' in text:
+                        return 90000
+                    return len(text.encode("utf-8"))
+            counter = Counter()
+            self.assertLessEqual(review._cost(review._prompt(rows, [], candidates), review.VERIFY_SYSTEM, review.schema(True), counter, 1920), 98304)
+            self.assertGreater(review._cost(review._prompt(rows, [], candidates), review.VERIFY_SYSTEM, review.schema(True), counter, 5760), 98304)
+            model = Mock(return_value=json.dumps({"candidates": candidates}))
+            result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(98304), call=model, counter=counter)
+            model.assert_called_once()
+            self.assertEqual(result["llm_review"]["status"], "incomplete")
+            self.assertEqual(result["llm_review"]["reason"], "verification_budget_exceeded")
+            self.assertFalse(result["llm_review"]["verification_coverage"]["complete"])
+
+    def test_verification_generation_limit_keeps_many_assignments_unapproved(self):
+        for valid_json in (True, False):
+            with self.subTest(valid_json=valid_json), tempfile.TemporaryDirectory() as root:
+                directory, report, rows = self.setup_review(root, "\n".join(f"[SPEAKER_{i:02d}] My name is Taylor Morgan." for i in range(15)))
+                candidates = [claim(row["turn_id"], "Taylor Morgan") for row in rows]
+                raw = json.dumps({"candidates": [{**row, "verdict": "supported"} for row in candidates]}) if valid_json else '{"candidates":['
+                model = Mock(side_effect=[json.dumps({"candidates": candidates}), {"response": raw, "done_reason": "length", "eval_count": 5760}])
+                result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(98304), call=model)
+                self.assertEqual(model.call_count, 2)
+                self.assertEqual(model.call_args_list[1].args[0]["num_predict"], 5760)
+                info = result["llm_review"]
+                self.assertEqual(info["status"], "incomplete")
+                self.assertEqual(info["passes"][1]["diagnostics"]["failure_category"], "generation_token_limit")
+                self.assertEqual(info["passes"][1]["candidates"], [])
+                self.assertTrue(all(row["suggested_name"] is None and not row["auto_approvable"] for row in info["assignments"]))
+                self.assertFalse((directory / "speaker_aliases.json").exists())
+                self.assertFalse((directory / turns.CORRECTIONS_FILE).exists())
 
     def test_context_env_and_cli_override_only_speaker_review(self):
         with patch.dict(os.environ, {"SPEAKER_REVIEW_NUM_CTX": "65536", "MEETING_REDUCE_NUM_CTX": "32768"}, clear=True):
@@ -773,10 +830,12 @@ class TwoPassTests(unittest.TestCase):
         text = "[SPEAKER_03] My name is Taylor Morgan.\n" + "\n".join("[SPEAKER_04] Routine context. " + "Report. " * 200 for _ in range(8)) + "\n[Chair] Casey, could you give the report?\n[SPEAKER_03] Yes, I'll check."
         with tempfile.TemporaryDirectory() as root:
             _, report, rows = self.setup_review(root, text)
+            # Allow the new 4K verification reserve while discovery still windows.
             model = Mock(side_effect=model_reply)
-            result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(8192), call=model)
+            result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(16384), call=model)
             self.assertFalse(result["llm_review"]["coverage"]["complete"])
             self.assertEqual(model.call_count, 2)
+            self.assertNotIn(rows[-1]["turn_id"], result["llm_review"]["coverage"]["included_turn_ids"])
             verification = json.loads(model.call_args_list[1].args[0]["prompt"])
             self.assertIn(rows[-1]["turn_id"], [row["turn_id"] for row in verification["transcript_turns"]])
             self.assertIn("Casey", model.call_args_list[1].args[0]["prompt"])
