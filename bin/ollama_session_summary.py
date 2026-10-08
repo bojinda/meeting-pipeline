@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ def call_ollama(
     keep_alive: str = "30m",
     temperature: float = 0.2,
     num_ctx: int | None = None,
+    usage_callback=None,
 ) -> str:
     options = {
         "temperature": temperature,
@@ -56,9 +58,14 @@ def call_ollama(
         method="POST",
     )
 
+    began = time.monotonic()
     with urllib.request.urlopen(req, timeout=3600) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
+    if usage_callback is not None:
+        usage_callback({"model": model, "num_ctx": num_ctx, "prompt_eval_count": data.get("prompt_eval_count") if type(data.get("prompt_eval_count")) is int else None,
+                        "eval_count": data.get("eval_count") if type(data.get("eval_count")) is int else None,
+                        "runtime_seconds": round(time.monotonic() - began, 3)})
     return (data.get("response") or "").strip()
 
 
@@ -178,7 +185,7 @@ def resolve_model_defaults(args: argparse.Namespace) -> None:
             setattr(args, attribute, fallback)
 
 
-def main(default_profile: str | None = None) -> int:
+def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _usage_callback=None) -> int:
     parser = argparse.ArgumentParser(
         description="Summarize transcript chunks with Ollama."
     )
@@ -245,7 +252,22 @@ def main(default_profile: str | None = None) -> int:
     parser.add_argument("--speaker-review-tokenizer", type=Path, help="Matching local tokenizer.json for speaker input budgeting")
     parser.add_argument("--speaker-review-window", type=int, help="Discovery window to review when the complete meeting exceeds budget")
 
-    args = parser.parse_args()
+    parser.add_argument("--synthesis-mode", choices=("map-reduce", "whole"), default="map-reduce", help="Meeting only: opt-in whole-meeting experiment; map/reduce remains default")
+    parser.add_argument("--synthesis-num-ctx", type=int, help="Independent whole-meeting context (default 98304 or MEETING_SYNTHESIS_NUM_CTX)")
+    parser.add_argument("--synthesis-model", help="Whole-meeting model override (default MEETING_SYNTHESIS_MODEL or selected reduce model)")
+    parser.add_argument("--synthesis-tokenizer", type=Path, help="Matching local tokenizer.json for whole-meeting budgeting")
+    parser.add_argument("--experiment-output-dir", type=Path, help="New isolated destination required for whole-meeting experiments")
+
+    args = _args if _args is not None else parser.parse_args()
+    synthesis_options = any(getattr(args, name) is not None for name in ("synthesis_num_ctx", "synthesis_model", "synthesis_tokenizer", "experiment_output_dir"))
+    if args.profile != "meeting" and (args.synthesis_mode != "map-reduce" or synthesis_options):
+        parser.error("Whole-meeting synthesis is available only in meeting mode")
+    if args.synthesis_mode == "map-reduce" and synthesis_options:
+        parser.error("Experimental options require --synthesis-mode whole")
+    if args.synthesis_mode == "whole" and args.experiment_output_dir is None:
+        parser.error("Whole-meeting synthesis requires --experiment-output-dir")
+    if args.synthesis_mode == "whole" and (args.suggest_speakers or args.suggest_speakers_llm or args.speaker_roster or args.speaker_suggestion_model):
+        parser.error("Run advisory speaker review separately; whole synthesis uses approved identities only")
     review_options = args.speaker_review_mode != "two-pass" or args.speaker_review_num_ctx is not None or args.speaker_review_tokenizer is not None or args.speaker_review_window is not None
     if args.profile != "meeting" and (args.suggest_speakers or args.speaker_roster is not None or args.suggest_speakers_llm or args.speaker_suggestion_model or review_options):
         parser.error("Speaker suggestions are available only in meeting mode")
@@ -259,6 +281,10 @@ def main(default_profile: str | None = None) -> int:
         resolve_model_defaults(args)
     except ValueError as exc:
         parser.error(str(exc))
+
+    if args.synthesis_mode == "whole":
+        from meeting_postprocess.whole_synthesis import run_experiment
+        return run_experiment(args, sys.modules[__name__])
 
     transcript_dir = args.transcript_dir.resolve()
     profile = args.profile
@@ -307,7 +333,7 @@ def main(default_profile: str | None = None) -> int:
         )
     ).expanduser().resolve()
 
-    summaries_dir = resolve_summary_dir(transcript_dir, summary_root)
+    summaries_dir = _summary_dir or resolve_summary_dir(transcript_dir, summary_root)
     summaries_dir.mkdir(parents=True, exist_ok=True)
 
     aliases: dict[str, str] = {}
@@ -421,6 +447,7 @@ def main(default_profile: str | None = None) -> int:
                 keep_alive=args.keep_alive,
                 temperature=args.temperature,
                 num_ctx=args.map_num_ctx,
+                **({"usage_callback": _usage_callback} if _usage_callback is not None else {}),
             )
         except Exception as exc:
             print(f"ERROR: Ollama map-stage failed for {chunk_id}: {exc}", file=sys.stderr)
@@ -502,6 +529,7 @@ def main(default_profile: str | None = None) -> int:
                 keep_alive=args.keep_alive,
                 temperature=args.temperature,
                 num_ctx=args.reduce_num_ctx,
+                **({"usage_callback": _usage_callback} if _usage_callback is not None else {}),
             )
             if profile == "meeting" and output_filename == "minutes-draft.md" and args.keep_recap and recap_combined:
                 recap = call_ollama(
@@ -512,6 +540,7 @@ def main(default_profile: str | None = None) -> int:
                     keep_alive=args.keep_alive,
                     temperature=args.temperature,
                     num_ctx=args.reduce_num_ctx,
+                    **({"usage_callback": _usage_callback} if _usage_callback is not None else {}),
                 )
                 content = insert_recap(content, recap)
         except Exception as exc:

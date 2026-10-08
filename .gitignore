@@ -56,3 +56,10 @@ cache/
 *.flac
 *.srt
 *.vtt
+
+# Private experimental whole-meeting evidence, plans and metrics
+whole-source.json
+whole-evidence.json
+whole-plan.json
+whole-run.json
+.whole-experiment-*/

@@ -778,6 +778,110 @@ Windows. Custom roster/alias filenames must also remain private and gitignored.
 Speaker review files and links to them are explicitly denied by the shared
 publication/export boundary; the three public document names are unchanged.
 
+### Experimental whole-meeting synthesis (Checkpoint B)
+
+Map/reduce remains the default. `--synthesis-mode whole` is an explicit meeting-only
+experiment against an existing `chunks_out/transcript_chunks.jsonl` index. It
+requires no recording, WhisperX rerun, or diarization changes. Run speaker review
+and approve aliases/turn corrections separately first; unapproved suggestions are
+never identities in this mode.
+
+Use a **new** destination outside the source directory and production summary
+root. The runner rejects existing destinations rather than overwriting a previous
+experiment. Example operator commands (run only after reviewing this checkpoint):
+
+```bash
+python bin/ollama_meeting_summary.py meeting-transcripts/session-123 --synthesis-mode whole --synthesis-model qwen3.8:27b --synthesis-num-ctx 98304 --synthesis-tokenizer /private/models/matching-tokenizer/tokenizer.json --experiment-output-dir ignore/experiments/session-123-whole --keep-recap
+# Compare the unchanged production map/reduce result with the experiment:
+diff -u meeting-summaries/session-123/minutes-draft.md ignore/experiments/session-123-whole/minutes-draft.md
+diff -u meeting-summaries/session-123/action-items.md ignore/experiments/session-123-whole/action-items.md
+```
+
+The whole-meeting context defaults independently to **98,304 tokens**. Optional
+`MEETING_SYNTHESIS_NUM_CTX`, `MEETING_SYNTHESIS_MODEL`, and
+`MEETING_SYNTHESIS_TOKENIZER` supply defaults; the corresponding CLI flags win.
+The model otherwise inherits the selected meeting reduce model. The tokenizer
+otherwise uses `SPEAKER_REVIEW_TOKENIZER` when configured. A matching local
+Qwen `tokenizer.json` and the optional `tokenizers` Python package enable model
+counts without downloads. Without that tokenizer, conservative UTF-8 byte
+budgeting may cause a fallback even when actual Qwen tokens would fit.
+`MEETING_SYNTHESIS_THINK=false` is the review default; `true` or `default` explicitly
+requests thinking or the model default. Map/reduce and lesson settings remain
+independent. The existing Ollama GPU1/Q8 configuration is used unchanged.
+
+The experiment applies the same redaction, normalization, classifier, approved
+global aliases and exact-turn corrections as meeting processing. It preserves
+chronological classified source records, retains historical recap separately,
+and excludes pre-meeting chatter from **both** whole-mode model prompts and all
+three public documents. Source indexes remain immutable. Containing chunk times
+are identified as source coordinates, not invented precise sentence timestamps.
+
+Two principal model stages are used:
+
+1. Extract structured topics, motions, decisions, actions, outstanding issues,
+   health/safety concerns, qualifications/disagreements and recap, citing exact
+   classified record IDs and full verbatim source quotations. This first version
+   deliberately uses extractive statements: a paraphrase or shortened condition
+   is rejected. Named motion roles and outcomes need explicit source evidence;
+   a meeting ending is not evidence that a motion carried. Actions need supported
+   undertakings/assignments for every owner, with existing outreach/proposal
+   guards and actor/recipient boundaries. Explicit collective undertakings with no
+   named owner stay unassigned and add a QA finding; their announcing speaker is
+   not silently made responsible. Historical actions stay historical.
+2. Organize the validated evidence into structured document plans. Deterministic
+   rendering produces the existing Markdown filenames from those evidence IDs,
+   so this pass cannot add an ungrounded prose claim or identity. Every validated
+   item is retained in the appropriate documents. Summary recap is explicitly
+   historical; minutes recap is controlled by `--keep-recap`; action items always
+   exclude recap. Source IDs appear only in private artifacts.
+
+The output remains a draft for operator review. Existing action filtering, motion
+cleanup, formatting, normalization, private-reference removal and deterministic
+QA are reused. Unresolved speakers and ambiguous roles remain flagged. Clear
+source commitments omitted by extraction add QA findings instead of invented
+replacement tasks. Full input coverage means all eligible text was supplied;
+it does **not** certify perfect semantic recall. Compare evidence, QA and documents.
+This experiment tests completeness/source accuracy before allowing free-form
+paraphrased synthesis.
+
+Context planning reserves the full schema, instructions, a 1,024-token framing
+allowance, up to 16,384 extraction tokens and up to 8,192 document-plan tokens.
+The second stage uses a smaller context when possible. Neither stage truncates
+records or drops qualifications/conflicting context to fit. If the complete
+source or document-plan input cannot fit, the established map/reduce path runs
+under the same GPU1 lock, writing only to the experiment's isolated destination.
+`whole-run.json` records the explicit fallback reason. Invalid JSON, unsupported
+claims/references, token-limit responses or transport failures stop safely;
+there are no automatic retries or partial JSON acceptance.
+
+The existing `with-gpu-lock.sh gpu1` supervisor covers both stages and any
+fallback. A stage already holding that configured lock is reused. Lock paths,
+timeouts, signal handling, device assignments, HA interfaces and audio deletion
+are unchanged. No voice embeddings, automatic aliases, or publication are added.
+
+Each experiment keeps these **private, gitignored, owner-only JSON artifacts**:
+
+- `whole-source.json`: eligible redacted records with source coordinates.
+- `whole-evidence.json`: validated evidence and safe rejection categories.
+- `whole-plan.json`: validated document plans referencing evidence IDs.
+- `whole-run.json`: requested/actual mode, coverage and excluded-section counts,
+  configured context/tokenizer, actual Ollama input/output token counts when
+  available, per-call and total runtime, fallback/failure reason, and QA counts.
+  Missing provider token counts remain `null`, never guessed as actual usage.
+
+Existing `meeting_sections.jsonl`, `chunk_summaries.jsonl`, `minutes-qa.md` and
+`minutes-qa.json` remain available. Whole mode has an empty chunk-summary file
+because it did not map chunks; a fallback writes the established chunk summaries.
+Private evidence/metrics filenames and links are explicitly denied at the shared
+publication/export boundary. Its public three-document allowlist is unchanged.
+Custom experiment locations must remain private and gitignored.
+
+Files are prepared in a private staging directory and the completed directory is
+renamed into place only after validation/rendering/QA succeed. Failed runs retain
+private diagnostics with no `summary.md`, `minutes-draft.md` or `action-items.md`
+at the destination. No real meeting trial or change to the default mode is part
+of this checkpoint.
+
 ### Normalization and meeting sections
 
 Known repairs include `Mack Yard`, `Mackyard`, and `Mac yard` → `Mac Yard`,
