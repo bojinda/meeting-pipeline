@@ -835,6 +835,50 @@ Two principal model stages are used:
    historical; minutes recap is controlled by `--keep-recap`; action items always
    exclude recap. Source IDs appear only in private artifacts.
 
+Whole-mode source encoding uses short **run-local** record numbers instead of
+repeating hash IDs. The model receives compact JSON arrays grouped by section,
+with one shared speaker table: each row is `[record_number, speaker_index, text]`.
+`B`, `R`, and `A` identify current business, historical recap, and adjournment.
+Every utterance stays in its own row, in order; identical utterances and different
+speakers are never collapsed. Redaction-affected source turns and turns following
+removed content are marked in `redaction_gaps`. These marks are conservative:
+continuity within or across such turns must not be assumed.
+
+`whole-source.json` retains complete original classified records, timing/provenance,
+source-turn IDs, original line coordinates, and the exact `compact_to_original`
+map plus a binding digest. Model citations use canonical decimal JSON strings
+(e.g. `"1"`); the validator resolves them to original record IDs and compares the
+quote with the **original record body**. Unknown/noncanonical IDs, missing rows,
+collisions, changed speaker/section boundaries, and changed quotations fail closed.
+No content, qualification, ownership rule or output reserve is removed to fit.
+
+A supported **read-only preflight** prepares the same source and performs the same
+accounting as the actual experiment, without an output destination, Ollama calls,
+GPU locks, or writes to transcripts/processing outputs:
+
+```bash
+python -B bin/ollama_meeting_summary.py meeting-transcripts/session-123 --synthesis-mode whole --synthesis-preflight --synthesis-model qwen3.8:27b --synthesis-num-ctx 98304 --synthesis-tokenizer /private/models/matching-tokenizer/tokenizer.json
+```
+
+Its JSON report contains source coverage and excluded-section counts, the old
+verbose and new compact source costs, transcript text, record IDs, section/speaker
+identifiers, JSON fields/structure, instructions/schema, the full generation and
+framing reserves, required context, signed remaining headroom, and selected mode.
+The source breakdown uses **ordered marginal ablations** (text, IDs, sections,
+speakers), leaving JSON structure and empty-placeholder costs as the residual.
+This accounts for BPE token-boundary effects; components are order-dependent but
+sum to the exact serialized-source count. Plain transcript tokenization is also
+reported separately and is not added a second time to the budget. Saved tokenizer
+truncation/padding is disabled for the in-memory whole-mode counter, never by
+editing the tokenizer file. If the matching tokenizer is unavailable, byte-bound
+counts are explicitly labelled; they are not Qwen token measurements.
+
+A preflight selecting fallback does **not** run map/reduce. An actual experiment
+still falls back safely if the complete compact source cannot fit. Preflight
+checks extraction capacity; document-stage capacity is checked after evidence
+extraction because that generated evidence does not exist during preflight.
+Preflight can be run before deciding whether to approve another live experiment.
+
 The output remains a draft for operator review. Existing action filtering, motion
 cleanup, formatting, normalization, private-reference removal and deterministic
 QA are reused. Unresolved speakers and ambiguous roles remain flagged. Clear
@@ -861,13 +905,15 @@ are unchanged. No voice embeddings, automatic aliases, or publication are added.
 
 Each experiment keeps these **private, gitignored, owner-only JSON artifacts**:
 
-- `whole-source.json`: eligible redacted records with source coordinates.
+- `whole-source.json`: eligible redacted records, source coordinates/turn IDs,
+  compact-to-original ID mapping and binding digest.
 - `whole-evidence.json`: validated evidence and safe rejection categories.
 - `whole-plan.json`: validated document plans referencing evidence IDs.
 - `whole-run.json`: requested/actual mode, coverage and excluded-section counts,
   configured context/tokenizer, actual Ollama input/output token counts when
   available, per-call and total runtime, fallback/failure reason, and QA counts.
-  Missing provider token counts remain `null`, never guessed as actual usage.
+  It also records the preflight token breakdown for the identical extraction
+  input. Missing provider token counts remain `null`, never guessed as actual usage.
 
 Existing `meeting_sections.jsonl`, `chunk_summaries.jsonl`, `minutes-qa.md` and
 `minutes-qa.json` remain available. Whole mode has an empty chunk-summary file

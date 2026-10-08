@@ -258,13 +258,15 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--synthesis-tokenizer", type=Path, help="Matching local tokenizer.json for whole-meeting budgeting")
     parser.add_argument("--experiment-output-dir", type=Path, help="New isolated destination required for whole-meeting experiments")
 
+    parser.add_argument("--synthesis-preflight", action="store_true", help="Read-only whole-mode preparation and context accounting; no models, locks or outputs")
+
     args = _args if _args is not None else parser.parse_args()
-    synthesis_options = any(getattr(args, name) is not None for name in ("synthesis_num_ctx", "synthesis_model", "synthesis_tokenizer", "experiment_output_dir"))
+    synthesis_options = args.synthesis_preflight or any(getattr(args, name) is not None for name in ("synthesis_num_ctx", "synthesis_model", "synthesis_tokenizer", "experiment_output_dir"))
     if args.profile != "meeting" and (args.synthesis_mode != "map-reduce" or synthesis_options):
         parser.error("Whole-meeting synthesis is available only in meeting mode")
     if args.synthesis_mode == "map-reduce" and synthesis_options:
         parser.error("Experimental options require --synthesis-mode whole")
-    if args.synthesis_mode == "whole" and args.experiment_output_dir is None:
+    if args.synthesis_mode == "whole" and args.experiment_output_dir is None and not args.synthesis_preflight:
         parser.error("Whole-meeting synthesis requires --experiment-output-dir")
     if args.synthesis_mode == "whole" and (args.suggest_speakers or args.suggest_speakers_llm or args.speaker_roster or args.speaker_suggestion_model):
         parser.error("Run advisory speaker review separately; whole synthesis uses approved identities only")
@@ -283,7 +285,9 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         parser.error(str(exc))
 
     if args.synthesis_mode == "whole":
-        from meeting_postprocess.whole_synthesis import run_experiment
+        from meeting_postprocess.whole_synthesis import run_experiment, run_preflight
+        if args.synthesis_preflight:
+            return run_preflight(args, sys.modules[__name__])
         return run_experiment(args, sys.modules[__name__])
 
     transcript_dir = args.transcript_dir.resolve()

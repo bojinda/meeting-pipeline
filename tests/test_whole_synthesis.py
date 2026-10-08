@@ -67,11 +67,14 @@ class FakeModel:
     def __call__(self, request):
         self.requests.append(request)
         payload = json.loads(request["prompt"])
-        stage = "evidence" if "meeting_records" in payload else "documents"
+        stage = "evidence" if payload.get("format") == "meeting-source-v1" else "documents"
         if self.fail_stage == stage:
             return {"response": "PRIVATE_MODEL_BODY not JSON", "done_reason": "stop"}
         if stage == "evidence":
-            records, evidence = payload["meeting_records"], []
+            # Decode the public model protocol independently of the ID resolver.
+            records = [{"id": str(sid), "section": payload["sections"][section], "speaker": payload["speakers"][speaker], "text": text}
+                       for section, rows in payload["runs"] for sid, speaker, text in rows]
+            evidence = []
             for number, record in enumerate(records, 1):
                 kind = "recap" if record["section"] == RECAP else "topic"
                 fields = {}
