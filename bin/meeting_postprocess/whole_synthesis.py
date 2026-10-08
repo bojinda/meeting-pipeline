@@ -32,6 +32,9 @@ from .rendering import insert_recap, strip_chunk_references
 from .publication import PUBLIC_MEETING_FILENAMES, strip_private_references
 from .whole_source import encode, resolve_evidence, budget, serialized, SourceEncodingError
 
+EVIDENCE_ID_PATTERN = r"^E[0-9]{1,6}$"
+PRIVATE_RESPONSE_FILENAME = "whole-model-response.json"
+
 PRIVATE_FILES = ("whole-source.json", "whole-evidence.json", "whole-plan.json", "whole-run.json")
 KINDS = ("topic", "motion", "decision", "action", "issue", "health_safety", "qualification", "recap")
 HEADINGS = dict(zip(KINDS, ("Topics Discussed", "Motions", "Decisions", "Action Items", "Outstanding Issues", "Health and Safety", "Qualifications and Disagreements", "Recap of Previous Meeting")))
@@ -48,7 +51,12 @@ later third party's step. Every item needs exact record IDs and exact verbatim
 quotes from those records. statement must equal one complete quoted record body:
 do not paraphrase, shorten a qualification, or merge claims. Motion roles/outcomes
 require explicit evidence; ending a meeting does not mean a motion carried.
-Return only schema JSON, concise items without duplicate claims. Use null for
+Return only schema JSON, concise items without duplicate claims.
+Every evidence item.id must be unique and match ^E[0-9]{1,6}$: E followed by
+1 to 6 digits, e.g. E1 or E15. This is not a source record ID. Output item.section
+must be a canonical full name: current_meeting_business, previous_meeting_recap,
+or adjournment. Input B maps to current_meeting_business, R to
+previous_meeting_recap, A to adjournment; never output B/R/A as item.section. Use null for
 unknown mover/seconder/outcome. Actions need supported owners; an explicit
 collective undertaking with no named owner has owners=[] and needs manual review.
 Do not assign a collective undertaking to its announcing speaker alone.
@@ -92,14 +100,14 @@ def settings(args):
 
 def extraction_schema():
     fields = {
-        "id": {"type": "string", "maxLength": 32},
+        "id": {"type": "string", "pattern": EVIDENCE_ID_PATTERN, "minLength": 2, "maxLength": 7, "description": "Unique evidence ID: E followed by 1-6 digits, e.g. E1; not a compact source citation"},
         "kind": {"type": "string", "enum": list(KINDS)},
-        "section": {"type": "string", "enum": [BUSINESS, ADJOURNMENT, RECAP]},
-        "statement": {"type": "string", "maxLength": 6000},
+        "section": {"type": "string", "enum": [BUSINESS, ADJOURNMENT, RECAP], "description": "Canonical full section name. Input B=current_meeting_business, R=previous_meeting_recap, A=adjournment. Do not output B/R/A"},
+        "statement": {"type": "string", "minLength": 1, "maxLength": 6000, "pattern": r"\S"},
         "quotes": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "object", "additionalProperties": False, "required": ["record_id", "text"], "properties": {"record_id": {"type": "string"}, "text": {"type": "string", "maxLength": 6000}}}},
-        "owners": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 120}},
-        "mover": {"type": ["string", "null"], "maxLength": 120},
-        "seconder": {"type": ["string", "null"], "maxLength": 120},
+        "owners": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": r"\S"}},
+        "mover": {"type": ["string", "null"], "minLength": 1, "maxLength": 120, "pattern": r"\S"},
+        "seconder": {"type": ["string", "null"], "minLength": 1, "maxLength": 120, "pattern": r"\S"},
         "outcome": {"type": ["string", "null"], "enum": [None, *OUTCOMES]},
     }
     return {"type": "object", "additionalProperties": False, "required": ["items"], "properties": {"items": {"type": "array", "maxItems": 512, "items": {"type": "object", "additionalProperties": False, "required": list(fields), "properties": fields}}}}
@@ -200,6 +208,64 @@ def run_preflight(args, engine):
         return 2
 
 
+def source_snapshot(args):
+    directory = args.transcript_dir.resolve()
+    return {"meeting_digest": hashlib.sha256(str(directory).encode()).hexdigest(),
+            "transcript_digest": hashlib.sha256((directory / "chunks_out" / "transcript_chunks.jsonl").read_bytes()).hexdigest(),
+            "aliases_digest": hashlib.sha256(serialized(load_aliases(directory, args.speaker_aliases)).encode()).hexdigest(),
+            "corrections_digest": hashlib.sha256(serialized(correction_document(directory)).encode()).hexdigest()}
+
+
+def response_binding(snapshot, records, encoded):
+    from .whole_source import fingerprint, validate
+    validate(encoded, records)
+    return {**snapshot, "records_digest": fingerprint(records),
+            "mapping_digest": hashlib.sha256(serialized(encoded["compact_to_original"]).encode()).hexdigest()}
+
+
+def save_response(path, raw, usage, binding):
+    envelope = {"version": 1, "stage": "evidence", "binding": binding, "generation": usage,
+                "schema_digest": hashlib.sha256(serialized(extraction_schema()).encode()).hexdigest(),
+                "system_digest": hashlib.sha256(COMPACT_EXTRACT_SYSTEM.encode()).hexdigest(),
+                "response": raw, "response_digest": hashlib.sha256(raw.encode()).hexdigest()}
+    write_private_json(path, envelope)
+
+
+def run_offline_validation(args, engine):
+    """Recheck a bound private response; never infer, publish or approve anything."""
+    try:
+        cache = json.loads(args.synthesis_validate_response.read_text(encoding="utf-8-sig"))
+        keys = {"version", "stage", "binding", "generation", "schema_digest", "system_digest", "response", "response_digest"}
+        if not isinstance(cache, dict) or set(cache) != keys or cache["version"] != 1 or cache["stage"] != "evidence" or not isinstance(cache["response"], str) or not isinstance(cache["generation"], dict):
+            raise SynthesisFailure("invalid_retained_response")
+        snapshot = source_snapshot(args)
+        _, _, _, records, _ = prepare_source(args, engine)
+        encoded = encode(records)
+        if source_snapshot(args) != snapshot or cache["binding"] != response_binding(snapshot, records, encoded):
+            raise SynthesisFailure("retained_source_binding_mismatch")
+        if cache["response_digest"] != hashlib.sha256(cache["response"].encode()).hexdigest():
+            raise SynthesisFailure("retained_response_integrity_mismatch")
+        if cache["generation"].get("done_reason") == "length":
+            raise SynthesisFailure("generation_token_limit")
+        generation = cache["generation"]
+        if type(generation.get("prompt_eval_count")) is int and type(generation.get("num_predict")) is int and type(generation.get("num_ctx")) is int and generation["prompt_eval_count"] + generation["num_predict"] + 1024 > generation["num_ctx"]:
+            raise SynthesisFailure("provider_context_budget_violation")
+        try:
+            data = local._strict_json(cache["response"])
+        except (ValueError, UnicodeError):
+            raise SynthesisFailure("invalid_generated_json") from None
+        accepted, rejected = validate_evidence(data, records, encoded)
+        print(json.dumps({"mode": "offline_evidence_validation", "status": "needs_review" if rejected else "passed", "source_binding": "matched", "accepted_item_count": len(accepted), "rejected": rejected, **rejection_summary(rejected)}, indent=2))
+        return 1 if rejected else 0
+    except Exception as exc:
+        category = exc.category if isinstance(exc, SynthesisFailure) else str(exc) if isinstance(exc, SourceEncodingError) else local.failure_diagnostics(exc)["failure_category"]
+        result = {"mode": "offline_evidence_validation", "status": "failed", "failure_category": category}
+        if isinstance(exc, SourceEncodingError) and hasattr(exc, "item_index"):
+            result.update(rejected=[{"item_index": exc.item_index, "category": category, "field": "quotes"}], **rejection_summary([{"item_index": exc.item_index, "category": category}]))
+        print(json.dumps(result))
+        return 2
+
+
 def _cost(prompt, system, schema, counter, output):
     return counter(prompt) + counter(system) + counter(json.dumps(schema)) + output + 1024
 
@@ -208,7 +274,7 @@ def _json(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def infer(stage, prompt, system, schema, options, output, counter, args, report, call):
+def infer(stage, prompt, system, schema, options, output, counter, args, report, call, retain=None):
     required = _cost(prompt, system, schema, counter, output)
     if required > options["num_ctx"]:
         raise SynthesisFailure(stage + "_context_budget_exceeded")
@@ -224,6 +290,8 @@ def infer(stage, prompt, system, schema, options, output, counter, args, report,
                                               "num_ctx": context, "num_predict": output, "think": {"true": True, "false": False, "default": None}[think], "keep_alive": args.keep_alive, "timeout": 3600}))
         raw = completion.pop("response")
         usage.update(completion, output_length=len(raw))
+        if retain is not None:
+            retain(raw, dict(usage))
         if completion.get("done_reason") == "length":
             raise SynthesisFailure("generation_token_limit")
         if completion.get("prompt_eval_count", 0) + output + 1024 > context:
@@ -246,25 +314,65 @@ def _supported_outcomes(source):
     return supported
 
 
+def evidence_structure_errors(item, seen, fields):
+    errors = []
+    def reject(category, field):
+        errors.append({"category": category, "field": field})
+    if not isinstance(item, dict) or set(item) != fields:
+        return [{"category": "missing_or_extra_fields", "field": "item"}]
+    identifier = item["id"]
+    if not isinstance(identifier, str) or not re.fullmatch(EVIDENCE_ID_PATTERN, identifier):
+        reject("invalid_evidence_id_format", "id")
+    elif identifier in seen:
+        reject("duplicate_evidence_id", "id")
+    else:
+        seen.add(identifier)
+    if not isinstance(item["kind"], str) or item["kind"] not in KINDS:
+        reject("invalid_kind", "kind")
+    if not isinstance(item["section"], str) or item["section"] not in {BUSINESS, ADJOURNMENT, RECAP}:
+        reject("invalid_section", "section")
+    if not isinstance(item["statement"], str) or not item["statement"].strip() or len(item["statement"]) > 6000:
+        reject("invalid_statement", "statement")
+    if not isinstance(item["owners"], list) or len(item["owners"]) > 8 or not all(isinstance(name, str) and name.strip() and len(name) <= 120 for name in item["owners"]):
+        reject("invalid_owners", "owners")
+    for key in ("mover", "seconder"):
+        value = item[key]
+        if value is not None and (not isinstance(value, str) or not value.strip() or len(value) > 120):
+            reject("invalid_role_fields", key)
+    if item["outcome"] is not None and (not isinstance(item["outcome"], str) or item["outcome"] not in OUTCOMES):
+        reject("invalid_role_fields", "outcome")
+    if not isinstance(item["quotes"], list) or not 1 <= len(item["quotes"]) <= 16 or not all(isinstance(quote, dict) and set(quote) == {"record_id", "text"} and isinstance(quote["text"], str) and len(quote["text"]) <= 6000 for quote in item["quotes"]):
+        reject("invalid_quotes", "quotes")
+    return errors
+
+
+def rejection_summary(rejected):
+    return {"rejected_item_count": len({row["item_index"] for row in rejected}),
+            "category_counts": dict(sorted(Counter(category for category, index in {(row["category"], row["item_index"]) for row in rejected}).items()))}
+
+
 def validate_evidence(data, records, encoded=None):
-    if encoded is not None:
-        data = resolve_evidence(data, encoded, records)
     fields = set(extraction_schema()["properties"]["items"]["items"]["required"])
     if not isinstance(data, dict) or set(data) != {"items"} or not isinstance(data["items"], list) or len(data["items"]) > 512:
         raise SynthesisFailure("invalid_evidence_schema")
+    if encoded is not None:
+        from .whole_source import validate
+        validate(encoded, records)
     known = {row["id"]: row for row in records}
     validated, rejected, ids, claims = [], [], set(), set()
     for index, item in enumerate(data["items"]):
         reason = None
-        if not isinstance(item, dict) or set(item) != fields or not isinstance(item.get("id"), str) or not re.fullmatch(r"E[0-9]{1,6}", item["id"]) or item["id"] in ids:
-            reason = "invalid_item_schema"
-        elif not isinstance(item["kind"], str) or item["kind"] not in KINDS or not isinstance(item["section"], str) or item["section"] not in {BUSINESS, ADJOURNMENT, RECAP} or not isinstance(item["statement"], str) or not item["statement"] or len(item["statement"]) > 6000:
-            reason = "invalid_item_schema"
-        elif not isinstance(item["owners"], list) or len(item["owners"]) > 8 or not all(isinstance(name, str) and 0 < len(name) <= 120 for name in item["owners"]) or any(not isinstance(item[key], (str, type(None))) for key in ("mover", "seconder", "outcome")):
-            reason = "invalid_item_schema"
-        elif not isinstance(item["quotes"], list) or not 1 <= len(item["quotes"]) <= 16:
-            reason = "invalid_quotes"
-        else:
+        errors = evidence_structure_errors(item, ids, fields)
+        if errors:
+            rejected.extend({"item_index": index, **error} for error in errors)
+            continue
+        if encoded is not None:
+            try:
+                item = resolve_evidence({"items": [item]}, encoded, records)["items"][0]
+            except SourceEncodingError as exc:
+                exc.item_index = index
+                raise
+        if not errors:
             cited = []
             for quote in item["quotes"]:
                 if not isinstance(quote, dict) or set(quote) != {"record_id", "text"} or not isinstance(quote["record_id"], str) or quote["record_id"] not in known or not isinstance(quote["text"], str) or quote["text"] != known[quote["record_id"]]["text"]:
@@ -330,7 +438,6 @@ def validate_evidence(data, records, encoded=None):
                 if reason is None and claim in claims:
                     reason = "duplicate_claim"
                 if reason is None:
-                    ids.add(item["id"])
                     claims.add(claim)
                     validated.append({**item, "quotes": [{"record_id": row["id"], "text": row["text"]} for row in cited], "source_order": cited[0]["position"]})
         if reason:
@@ -441,7 +548,10 @@ def run_experiment(args, engine, call=None):
     report = {"requested_mode": "whole", "processing_mode": "whole", "status": "failed", "context": options, "calls": [], "coverage": {}, "fallback_reason": None}
     status = 1
     try:
+        snapshot = source_snapshot(args)
         redacted, aliases, prepared, records, counts = prepare_source(args, engine)
+        if snapshot != source_snapshot(args):
+            raise SynthesisFailure("source_changed_during_preparation")
         write_private_redactions(stage, redacted.redactions)
         report["coverage"] = {"section_counts": counts, "eligible_records": len(records), "eligible_record_ids": [row["id"] for row in records], "whole_included_record_ids": [], "complete": False}
         (stage / "meeting_sections.jsonl").write_text("".join(_json(row) + "\n" for row in prepared), encoding="utf-8")
@@ -456,10 +566,20 @@ def run_experiment(args, engine, call=None):
         if records:
             report["coverage"]["whole_included_record_ids"] = [row["id"] for row in records]
             report["coverage"]["whole_input_complete"] = True
-            extracted = infer("evidence", prompt, COMPACT_EXTRACT_SYSTEM, extraction_schema(), options, output, counter, args, report, call or local._http_call)
+            retain = None
+            if args.synthesis_retain_response:
+                binding = response_binding(snapshot, records, encoded)
+                def retain(raw, usage):
+                    save_response(stage / PRIVATE_RESPONSE_FILENAME, raw, usage, binding)
+                    report["response_retained"] = True
+            extracted = infer("evidence", prompt, COMPACT_EXTRACT_SYSTEM, extraction_schema(), options, output, counter, args, report, call or local._http_call, retain=retain)
             evidence, rejected = validate_evidence(extracted, records, encoded)
             report["rejected_evidence"] = rejected
-            write_private_json(stage / PRIVATE_FILES[1], {"items": evidence, "rejected": rejected})
+            diagnostics = rejection_summary(rejected)
+            report["evidence_validation"] = diagnostics
+            if rejected:
+                print("[whole] Evidence rejections: " + json.dumps(diagnostics), flush=True)
+            write_private_json(stage / PRIVATE_FILES[1], {"items": evidence, "rejected": rejected, **diagnostics})
             if rejected:
                 raise SynthesisFailure("unsupported_evidence")
             report["coverage"]["whole_included_record_ids"] = [row["id"] for row in records]
@@ -505,6 +625,8 @@ def run_experiment(args, engine, call=None):
             report.update(processing_mode="map_reduce_fallback", fallback_reason=exc.category)
             fallback = copy(args)
             fallback.synthesis_mode = "map-reduce"
+            fallback.synthesis_retain_response = False
+            fallback.synthesis_validate_response = None
             fallback.experiment_output_dir = None
             fallback.synthesis_num_ctx = fallback.synthesis_model = fallback.synthesis_tokenizer = None
             def usage(metadata):
@@ -529,6 +651,10 @@ def run_experiment(args, engine, call=None):
             write_report(stage, [Finding("whole_synthesis_failed", 0, "Experimental synthesis failed: " + exc.category, "")])
     except Exception as exc:
         report.update({"failure_category": str(exc)} if isinstance(exc, SourceEncodingError) else local.failure_diagnostics(exc))
+        if isinstance(exc, SourceEncodingError) and hasattr(exc, "item_index"):
+            rejected = [{"item_index": exc.item_index, "category": str(exc), "field": "quotes"}]
+            report["rejected_evidence"] = rejected
+            report["evidence_validation"] = rejection_summary(rejected)
         write_report(stage, [Finding("whole_synthesis_failed", 0, "Experimental synthesis failed; inspect safe private diagnostics.", "")])
     finally:
         if status != 0:

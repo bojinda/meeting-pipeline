@@ -879,6 +879,54 @@ checks extraction capacity; document-stage capacity is checked after evidence
 extraction because that generated evidence does not exist during preflight.
 Preflight can be run before deciding whether to approve another live experiment.
 
+Evidence output has an explicit contract distinct from compact source encoding:
+`item.id` is unique and matches `^E[0-9]{1,6}$` (e.g. `E1`, `E15`). Source
+citations remain canonical decimal strings such as `quotes.record_id="1"`.
+Output `item.section` uses the full names `current_meeting_business`,
+`previous_meeting_recap`, or `adjournment`; input B/R/A codes are **not** valid
+output section values. Schema and validator share the ID pattern and section
+contract. Invalid formats/codes are rejected, never renamed or reinterpreted.
+
+Structural diagnostics retain item indexes and fixed field/category names only:
+`missing_or_extra_fields`, `invalid_evidence_id_format`, `duplicate_evidence_id`,
+`invalid_kind`, `invalid_section`, `invalid_statement`, `invalid_owners`, and
+`invalid_role_fields` (plus quotation diagnostics). An item can contribute several
+categories; aggregate counts count distinct rejected items per category rather
+than inflating counts for multiple bad role fields. `whole-run.json` and
+`whole-evidence.json` include those counts and a distinct rejected-item count.
+Neither diagnostic records nor console summaries include field values, quotes,
+meeting names or raw model output. Structurally valid items still undergo all
+exact quotation/reference, section, motion, decision and owner checks.
+
+Optional **private response retention** avoids repeating inference to diagnose a
+schema failure. Add `--synthesis-retain-response` to an explicitly reviewed whole
+experiment command. This writes owner-only, atomic `whole-model-response.json`
+inside its private isolated output, including the exact evidence-stage response
+buffer, safe generation metadata and opaque source-binding digests. It is
+explicitly gitignored and denied by publication/export/link filtering. Thinking
+text and HTTP error bodies are not retained. Retention is off by default; it
+adds no model call or retry and does not accept malformed/truncated JSON.
+
+Validate a retained response offline against the **same** unchanged source and
+approved identity configuration, without a tokenizer, GPU lock, model call,
+public documents, alias edits, or response edits:
+
+```bash
+python -B bin/ollama_meeting_summary.py meeting-transcripts/session-123 --synthesis-mode whole --synthesis-validate-response ignore/experiments/session-123-whole/whole-model-response.json
+```
+
+The command reports accepted/rejected counts and safe indexed categories only.
+It returns 0 for passed validation, 1 for rejected evidence, and 2 for invalid
+binding/response/generation. Source binding covers the meeting location, complete
+original transcript index, approved aliases/corrections, prepared records and
+compact mapping. Changed or foreign source, changed approvals and accidental
+response edits are rejected. A token-limit response remains unusable even if its
+JSON happens to parse. Saved schema/prompt digests are provenance: offline checks
+use the current strict validator so future validator fixes do not require another
+model call. Offline success is diagnostic only and never applies the response to
+meeting documents. Prior runs without retention cannot recover their discarded
+raw responses through this helper.
+
 The output remains a draft for operator review. Existing action filtering, motion
 cleanup, formatting, normalization, private-reference removal and deterministic
 QA are reused. Unresolved speakers and ambiguous roles remain flagged. Clear
@@ -909,6 +957,9 @@ Each experiment keeps these **private, gitignored, owner-only JSON artifacts**:
   compact-to-original ID mapping and binding digest.
 - `whole-evidence.json`: validated evidence and safe rejection categories.
 - `whole-plan.json`: validated document plans referencing evidence IDs.
+- `whole-model-response.json`: optional source-bound evidence response retained
+  only with `--synthesis-retain-response`, including failed JSON/schema responses
+  for private offline diagnosis.
 - `whole-run.json`: requested/actual mode, coverage and excluded-section counts,
   configured context/tokenizer, actual Ollama input/output token counts when
   available, per-call and total runtime, fallback/failure reason, and QA counts.

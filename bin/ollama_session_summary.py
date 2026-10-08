@@ -258,16 +258,22 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--synthesis-tokenizer", type=Path, help="Matching local tokenizer.json for whole-meeting budgeting")
     parser.add_argument("--experiment-output-dir", type=Path, help="New isolated destination required for whole-meeting experiments")
 
-    parser.add_argument("--synthesis-preflight", action="store_true", help="Read-only whole-mode preparation and context accounting; no models, locks or outputs")
+    inspection = parser.add_mutually_exclusive_group()
+    inspection.add_argument("--synthesis-preflight", action="store_true", help="Read-only whole-mode preparation and context accounting; no models, locks or outputs")
+
+    inspection.add_argument("--synthesis-validate-response", type=Path, help="Read-only offline validation of a private source-bound evidence response; no models or public outputs")
+    parser.add_argument("--synthesis-retain-response", action="store_true", help="Explicitly retain a private source-bound evidence response for offline debugging")
 
     args = _args if _args is not None else parser.parse_args()
-    synthesis_options = args.synthesis_preflight or any(getattr(args, name) is not None for name in ("synthesis_num_ctx", "synthesis_model", "synthesis_tokenizer", "experiment_output_dir"))
+    synthesis_options = args.synthesis_retain_response or args.synthesis_validate_response is not None or args.synthesis_preflight or any(getattr(args, name) is not None for name in ("synthesis_num_ctx", "synthesis_model", "synthesis_tokenizer", "experiment_output_dir"))
     if args.profile != "meeting" and (args.synthesis_mode != "map-reduce" or synthesis_options):
         parser.error("Whole-meeting synthesis is available only in meeting mode")
     if args.synthesis_mode == "map-reduce" and synthesis_options:
         parser.error("Experimental options require --synthesis-mode whole")
-    if args.synthesis_mode == "whole" and args.experiment_output_dir is None and not args.synthesis_preflight:
+    if args.synthesis_mode == "whole" and args.experiment_output_dir is None and not args.synthesis_preflight and args.synthesis_validate_response is None:
         parser.error("Whole-meeting synthesis requires --experiment-output-dir")
+    if args.synthesis_retain_response and (args.synthesis_preflight or args.synthesis_validate_response is not None):
+        parser.error("Response retention requires an inference run; inspection modes never write artifacts")
     if args.synthesis_mode == "whole" and (args.suggest_speakers or args.suggest_speakers_llm or args.speaker_roster or args.speaker_suggestion_model):
         parser.error("Run advisory speaker review separately; whole synthesis uses approved identities only")
     review_options = args.speaker_review_mode != "two-pass" or args.speaker_review_num_ctx is not None or args.speaker_review_tokenizer is not None or args.speaker_review_window is not None
@@ -285,9 +291,11 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         parser.error(str(exc))
 
     if args.synthesis_mode == "whole":
-        from meeting_postprocess.whole_synthesis import run_experiment, run_preflight
+        from meeting_postprocess.whole_synthesis import run_experiment, run_preflight, run_offline_validation
         if args.synthesis_preflight:
             return run_preflight(args, sys.modules[__name__])
+        if args.synthesis_validate_response is not None:
+            return run_offline_validation(args, sys.modules[__name__])
         return run_experiment(args, sys.modules[__name__])
 
     transcript_dir = args.transcript_dir.resolve()

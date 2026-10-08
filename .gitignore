@@ -63,3 +63,6 @@ whole-evidence.json
 whole-plan.json
 whole-run.json
 .whole-experiment-*/
+
+# Explicit opt-in private model response; never publish or commit
+whole-model-response.json
