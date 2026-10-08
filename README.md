@@ -542,7 +542,8 @@ Meeting mode can suggest names from **non-redacted text evidence**. Enable it
 explicitly with `--suggest-speakers`; normal processing and Home Assistant
 commands retain their defaults. There are no voiceprints, speaker embeddings,
 biometric matching or cross-meeting identity stores. Heuristic mode makes no
-additional model calls. Only the explicit local LLM option adds a bounded call.
+additional model calls. Only the explicit local LLM option adds bounded discovery
+and verification calls (at most two per invocation).
 Suggestions never modify or replace approved aliases and are never supplied to
 the map/reduce models. Approval remains the operator's decision.
 
@@ -568,8 +569,10 @@ Operator workflow:
 3. Inspect `meeting-summaries/session-123/speaker-suggestions.json` privately.
    Each unresolved visible `SPEAKER_XX` has a suggested name or `null`, a
    confidence label, evidence excerpts/types/IDs, conflicting candidates, and
-   `origin` (`heuristic`, `llm`, or `both`). The private `llm_review` field records
-   status, sampled evidence, structured response, and validation issues.
+   `origin` (`heuristic`, `llm`, or `both`). In the default two-pass mode,
+   `llm_review` separately records source-turn assignments, both passes,
+   coverage, validation issues, and diagnostics; `speaker-turns.json` contains
+   the corresponding redacted source text and effective approved identities.
 4. Verify identities, then approve/edit the existing per-meeting
    `speaker_aliases.json`. The optional helper merges **only** explicitly selected,
    unambiguous suggestions, never all suggestions:
@@ -579,7 +582,9 @@ Operator workflow:
    Multiple `--approve` flags select multiple labels. It rejects a review from
    another meeting or a changed visible transcript and cannot overwrite a
    different existing approved alias.
-   The helper rechecks current source relationships and model evidence. Editing
+   This label-wide helper is for heuristic or explicit legacy reviews only;
+   two-pass reviews require the exact-turn approval workflow below. The helper
+   rechecks current source relationships and model evidence. Editing
    JSON confidence/candidate/ambiguity fields cannot bypass that verification.
    Low-confidence, ambiguous, or null suggestions require manual verification
    and alias editing. Use the same `--speaker-roster` when reviewing/approving
@@ -592,6 +597,48 @@ Operator workflow:
 Both commands use `MEETING_SUMMARIES_ROOT` when set. Standalone `suggest` also
 accepts `--output-dir`; `approve --suggestions /private/path/speaker-suggestions.json`
 selects a review there. Existing `--speaker-aliases` behavior remains supported.
+
+#### Source turns and explicit corrections
+
+A diarization label can represent multiple people. Use an exact-turn correction
+instead of assigning one global alias to a mixed label:
+
+```bash
+python bin/suggest_meeting_speakers.py inspect-turns meeting-transcripts/session-123
+python bin/suggest_meeting_speakers.py suggest meeting-transcripts/session-123 --llm
+# Inspect the private JSON files, then copy the exact T... ID you verified:
+python bin/suggest_meeting_speakers.py approve-turn meeting-transcripts/session-123 --turn-id T... --name "Casey"
+python bin/suggest_meeting_speakers.py turn-conflicts meeting-transcripts/session-123
+python bin/ollama_meeting_summary.py meeting-transcripts/session-123
+# To undo only that correction:
+python bin/suggest_meeting_speakers.py remove-turn meeting-transcripts/session-123 --turn-id T...
+```
+
+`approve-turn` requires an operator-supplied ID **and** name on every invocation;
+it never imports model assignments. Inspecting, suggesting, or editing a review
+artifact cannot approve a correction. It writes private
+`speaker_turn_corrections.json` beside the source index, leaving global aliases
+and source files unchanged. The correction takes precedence over a global alias
+only for that bound turn during meeting postprocessing. Other turns retain their
+existing alias behavior. Conflicts are written to private
+`speaker-turn-conflicts.json`; inspection supports `--turn-id` and both inspection
+commands support `--output-dir`. Nothing prints transcript excerpts to logs.
+
+Turn IDs hash original source text, speaker, and source coordinates before
+redaction. Existing unambiguous WhisperX turn metadata supplies precise timestamps
+when available; historical indexes otherwise use source chunk/line coordinates
+and containing chunk timestamps. No WhisperX rerun is required. Repeating a review
+against the same source produces the same IDs; aliases do not change them.
+Changed bindings, fully redacted turns, and corrections copied from another
+meeting are rejected. Adding/changing source metadata or moving a session can
+require new approvals. `remove-turn` can remove a stale entry. A merged ASR line
+remains one source unit: this feature does not split speakers inside that line.
+
+Turn corrections are a direct human decision, independent of a model's confidence.
+Conflicting or unverified model assignments have `suggested_name: null`, retain
+their leads privately, and cannot be promoted through label-wide `approve`.
+Even a grounded, independently verified assignment remains advisory and requires
+an explicit `approve-turn`. There is no automatic correction or bulk approval.
 
 An optional per-meeting `speaker_roster.private.json` can supply preferred
 spellings, name variants, and roles:
@@ -625,26 +672,60 @@ uncertain source attribution and cannot be approved through the helper, even
 without a competing name. Compare the session index when checking production
 candidate counts; the text export may have different grouping.
 
-Local LLM review uses the existing `OLLAMA_URL` and meeting reduce-model/context
-defaults. `--speaker-suggestion-model MODEL` overrides only this review's model;
-standalone `--reduce-model`, `--reduce-num-ctx`, and `--ollama-url` also select
-settings explicitly. Source remains authoritative: names, labels, relationship
+Local LLM review uses the existing `OLLAMA_URL` and meeting reduce-model default.
+`--speaker-suggestion-model MODEL` overrides only this review's model;
+standalone `--reduce-model` and `--ollama-url` also select settings explicitly.
+The default two-pass review has its **own 98,304-token context**, independent of
+meeting map/reduce settings. Set `SPEAKER_REVIEW_NUM_CTX` or the higher-priority
+`--speaker-review-num-ctx` flag. `--reduce-num-ctx` does not control this mode.
+Source remains authoritative: names, labels, relationship
 types, and evidence IDs must be grounded in the supplied redacted snippets.
 Roster-only guesses, fabricated IDs, and invented names are rejected. A model
 candidate whose name appears in cited transcript evidence but whose relationship
-cannot be independently grounded is kept privately under `unverified_leads`,
-with evidence IDs and `approvable: false`. This includes possible relationships
+cannot be independently grounded is kept privately as an unverified assignment
+or verification lead (legacy: `unverified_leads`), with evidence IDs and no
+approval eligibility. This includes possible relationships
 and unrelated mentions needing human interpretation; neither becomes a verified
 candidate. Fresh approval checks repeat grounding from the current source.
 Heuristic/model disagreement or explicit model uncertainty remains
 for manual review; a model cannot choose a winner in a diarization collision or
 replace an approved alias. Transcript text is untrusted data, never instructions.
 
-The stage makes at most one request per meeting, samples introductions, addresses,
-roles and representative turns across the entire meeting, and bounds the evidence
-packet to at most 60 windows/18,000 characters. Review context is bounded to
-4,096–32,768 tokens; generation is bounded to one quarter of that context
-(at most 8,192 tokens), temperature zero, with a 120-second HTTP timeout.
+Discovery receives the full redacted meeting when it fits its input budget.
+Independent verification sees proposed names/turn IDs without discovery confidence,
+their cited context, neighboring turns, and competing identity evidence elsewhere
+in the meeting. It uses a smaller context when possible. Each pass is one request,
+temperature zero, with a 600-second HTTP timeout and no automatic retry.
+If discovery fails or finds no candidates, verification is skipped.
+
+Input budgeting includes instructions, JSON schema, roster, a 1,024-token framing
+reserve, and a structured-output reserve (up to 8,192 tokens for discovery and
+4,096 for verification). Configure a **matching local** `tokenizer.json` with
+`SPEAKER_REVIEW_TOKENIZER` or `--speaker-review-tokenizer` to count model tokens;
+this requires the optional Python `tokenizers` package in the processing environment.
+No tokenizer/model is downloaded. Without one, the conservative UTF-8 byte upper
+bound may select windows even when the model's actual token count would fit.
+The private report records the counting method and actual Ollama token counts
+when returned. A configured but unavailable tokenizer fails safely.
+
+If the meeting does not fit, discovery plans contiguous source-turn windows with
+up to two overlapping turns, processes **one selected window per invocation**,
+and records incomplete coverage plus all included/omitted/oversized turn IDs.
+Whole source turns are never silently truncated. Select another zero-based window
+with `--speaker-review-window N` (or `SPEAKER_REVIEW_WINDOW`); use a distinct
+`--output-dir` for each review to retain earlier window results. An individually
+oversized turn is reported uncovered. Verification that cannot fit its full
+evidence set is reported incomplete rather than dropping conflicting context.
+For example:
+
+```bash
+python bin/suggest_meeting_speakers.py suggest meeting-transcripts/session-123 --llm --speaker-review-num-ctx 98304 --speaker-review-tokenizer /private/models/matching-tokenizer/tokenizer.json --speaker-review-window 0 --output-dir /private/reviews/session-123/window-0
+```
+
+For compatibility, explicitly select `--speaker-review-mode legacy` to use the
+previous single-call label reviewer. Only that mode retains the 32,768-token
+maximum, 18,000-character sampled evidence limit, meeting reduce-context default,
+and 120-second timeout. The default two-pass mode has neither of those old caps.
 The request supplies an explicit [Ollama JSON schema](https://docs.ollama.com/capabilities/structured-outputs)
 and validates the generated JSON locally. Speaker review disables model thinking
 by default; set `SPEAKER_REVIEW_THINK=true` to request it, or `default` to omit
@@ -654,7 +735,8 @@ redirects, environment HTTP proxies, and cloud-tagged models are not used;
 select an installed local model. No live model is required
 by the tests. Unavailable Ollama, timeout, or invalid JSON leaves safe heuristic
 results and an incomplete/unavailable status; normal meeting processing continues.
-Private `llm_review.diagnostics` records a failure category, generated-output
+Private per-pass `llm_review.passes[].diagnostics` (or legacy
+`llm_review.diagnostics`) records a failure category, generated-output
 character count, `done_reason` when supplied by Ollama, token/thinking-length
 counts when available, and validation error categories. It distinguishes empty
 or malformed generated JSON, invalid schema, generation token limits, HTTP/model/
@@ -679,7 +761,8 @@ omitted conservatively; visible self-identifications can still be reviewed.
 A redaction-bearing rerun clears stale suggestion artifacts even when suggestions
 are disabled. Source transcripts and recordings are not edited by this stage.
 
-Suggestions, rosters, aliases, and private temporary writes are gitignored.
+Suggestions, rosters, aliases, turn catalogs, turn corrections, conflict reports,
+and private temporary writes are gitignored.
 Suggestion/approval writes use atomic replacement and owner-only `0600`
 permissions on POSIX; protect the private directory with filesystem ACLs on
 Windows. Custom roster/alias filenames must also remain private and gitignored.

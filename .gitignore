@@ -22,6 +22,9 @@ redactions.json
 speaker-suggestions.json
 speaker_roster.private.json
 speaker_aliases.json
+speaker_turn_corrections.json
+speaker-turns.json
+speaker-turn-conflicts.json
 .private-speaker-*.tmp
 
 # Python

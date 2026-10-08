@@ -480,7 +480,7 @@ class LocalLockTests(unittest.TestCase):
 
 
 class PipelineReviewTests(unittest.TestCase):
-    def test_zero_review_calls_by_default_and_exactly_one_when_requested(self):
+    def test_zero_review_calls_by_default_and_exactly_one_in_legacy_mode(self):
         helper = existing.SpeakerPipelineTests()
         with tempfile.TemporaryDirectory() as directory, patch.object(review, "call_local_ollama", return_value=json.dumps(proposal(references=["E000001"]))) as model:
             root = Path(directory)
@@ -508,12 +508,12 @@ class PipelineReviewTests(unittest.TestCase):
             self.assertEqual(report["llm_review"]["status"], "unavailable")
             self.assertEqual(next(row for row in report["suggestions"] if row["speaker_label"] == "SPEAKER_03")["suggested_name"], "Taylor Morgan")
 
-    def test_standalone_llm_reuses_meeting_defaults_and_does_not_rerun_summary(self):
+    def test_standalone_legacy_llm_reuses_meeting_defaults_and_does_not_rerun_summary(self):
         helper = existing.SpeakerCommandTests()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             transcript = helper.setup_meeting(root)
-            with patch.dict(os.environ, {"MEETING_SUMMARIES_ROOT": str(root / "outputs"), "MEETING_REDUCE_MODEL": "chosen-reduce-model", "MEETING_REDUCE_NUM_CTX": "8192"}, clear=True), patch.object(sys, "argv", ["speaker", "suggest", str(transcript), "--llm"]), patch.object(review, "call_local_ollama", return_value=json.dumps(proposal())) as model, patch.object(existing.engine, "call_ollama") as summary, contextlib.redirect_stdout(io.StringIO()):
+            with patch.dict(os.environ, {"MEETING_SUMMARIES_ROOT": str(root / "outputs"), "MEETING_REDUCE_MODEL": "chosen-reduce-model", "MEETING_REDUCE_NUM_CTX": "8192"}, clear=True), patch.object(sys, "argv", ["speaker", "suggest", str(transcript), "--llm", "--speaker-review-mode", "legacy"]), patch.object(review, "call_local_ollama", return_value=json.dumps(proposal())) as model, patch.object(existing.engine, "call_ollama") as summary, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(command.main(), 0)
                 self.assertEqual(model.call_args.args[0]["model"], "chosen-reduce-model")
                 self.assertEqual(model.call_args.args[0]["num_ctx"], 8192)

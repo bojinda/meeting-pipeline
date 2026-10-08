@@ -78,7 +78,7 @@ def _completion(data: dict) -> dict:
     result = {"response": data["response"]}
     if isinstance(data.get("done_reason"), str):
         result["done_reason"] = data["done_reason"] if data["done_reason"] in {"stop", "length", "load", "unload"} else "other"
-    for key in ("eval_count", "thinking_length"):
+    for key in ("eval_count", "thinking_length", "prompt_eval_count", "total_duration"):
         if type(data.get(key)) is int and data[key] >= 0:
             result[key] = data[key]
     if isinstance(data.get("thinking"), str):
@@ -262,12 +262,12 @@ def _http_call(request: dict) -> dict:
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
-    payload = {"model": request["model"], "prompt": request["prompt"], "system": SYSTEM, "format": RESPONSE_SCHEMA, "stream": False, "keep_alive": request.get("keep_alive", "30m"), "options": {"temperature": 0, "num_ctx": request["num_ctx"], "num_predict": _generation_budget(request["num_ctx"])}}
+    payload = {"model": request["model"], "prompt": request["prompt"], "system": request.get("system", SYSTEM), "format": request.get("format", RESPONSE_SCHEMA), "stream": False, "keep_alive": request.get("keep_alive", "30m"), "options": {"temperature": 0, "num_ctx": request["num_ctx"], "num_predict": request.get("num_predict", _generation_budget(request["num_ctx"]))}}
     if request.get("think", False) is not None:
         payload["think"] = request.get("think", False)
     http = urllib.request.Request(request["ollama_url"].rstrip("/") + "/api/generate", data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    with opener.open(http, timeout=120) as response:
+    with opener.open(http, timeout=request.get("timeout", 120)) as response:
         body = response.read(1048577)
     if len(body) > 1048576:
         raise ReviewFailure("ollama_response_limit")
@@ -358,6 +358,8 @@ def review_speakers(report: dict, chunks: list[dict], approved: dict, roster: li
 
 def reground_review(report: dict, chunks: list[dict], approved: dict, roster: list[dict]) -> dict:
     """Approval trusts current source evidence, never editable ambiguity flags."""
+    if "llm_review" in report and (report["llm_review"].get("mode") == "two_pass_turn_review" or not isinstance(report["llm_review"].get("response"), dict)):
+        raise ValueError("Two-pass reviews require explicit approve-turn with a source turn ID and name; do not promote turn suggestions to global aliases")
     fresh = build_speaker_suggestions(chunks, approved, roster, report.get("meeting_id"))
     review = report.get("llm_review", {})
     if isinstance(review.get("response"), dict):

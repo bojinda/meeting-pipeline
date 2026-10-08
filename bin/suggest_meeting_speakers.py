@@ -10,6 +10,8 @@ from pathlib import Path
 from meeting_postprocess.aliases import load_aliases
 from meeting_postprocess.normalization import SPEAKER_LABEL
 from meeting_postprocess.speaker_review import reground_review, review_speakers
+from meeting_postprocess.speaker_turn_review import review_turns, settings, source_events
+from meeting_postprocess.speaker_turns import turn_catalog, correction_document, correction_conflicts, effective_turns, approve_turn, remove_turn, read_index, TURNS_FILE, CONFLICTS_FILE
 from ollama_session_summary import resolve_model_defaults
 from meeting_postprocess.speaker_suggestions import (
     PRIVATE_SUGGESTIONS_FILENAME, _plain_name, build_speaker_suggestions,
@@ -25,8 +27,12 @@ def main() -> int:
     suggest.add_argument("--speaker-roster", type=Path)
     suggest.add_argument("--speaker-aliases", type=Path)
     suggest.add_argument("--output-dir", type=Path)
-    suggest.add_argument("--llm", "--suggest-speakers-llm", action="store_true", help="Request one bounded local Ollama review under the GPU1 lock")
+    suggest.add_argument("--llm", "--suggest-speakers-llm", action="store_true", help="Request bounded discovery and verification under one GPU1 lock")
     suggest.add_argument("--speaker-suggestion-model")
+    suggest.add_argument("--speaker-review-mode", choices=("two-pass", "legacy"), default="two-pass", help="Default: two-pass turn review; legacy retains compatibility with older label reviews")
+    suggest.add_argument("--speaker-review-num-ctx", type=int, help="Independent speaker context (default 98304 or SPEAKER_REVIEW_NUM_CTX)")
+    suggest.add_argument("--speaker-review-tokenizer", type=Path, help="Matching local tokenizer.json; no downloads")
+    suggest.add_argument("--speaker-review-window", type=int, help="Select an overlapping discovery window (default 0)")
     suggest.add_argument("--reduce-model", help="Meeting model override; otherwise use existing meeting environment defaults")
     suggest.add_argument("--reduce-num-ctx", type=int)
     suggest.add_argument("--ollama-url", default=os.environ.get("OLLAMA_URL", "http://192.168.0.105:11434"))
@@ -36,23 +42,73 @@ def main() -> int:
     approve.add_argument("--speaker-aliases", type=Path)
     approve.add_argument("--speaker-roster", type=Path, help="Use the same private roster as the reviewed suggestions")
     approve.add_argument("--approve", action="append", required=True, metavar="SPEAKER_XX")
+    for name in ("inspect-turns", "approve-turn", "remove-turn", "turn-conflicts"):
+        action = commands.add_parser(name, help="Private source-turn inspection/correction; never runs WhisperX or models")
+        action.add_argument("transcript_dir", type=Path)
+        action.add_argument("--speaker-aliases", type=Path)
+        if name in {"inspect-turns", "turn-conflicts"}:
+            action.add_argument("--output-dir", type=Path)
+        if name != "turn-conflicts":
+            action.add_argument("--turn-id", required=name in {"approve-turn", "remove-turn"})
+        if name == "approve-turn":
+            action.add_argument("--name", required=True, help="Explicitly approved identity for this exact source turn")
     args = parser.parse_args()
     try:
         transcript = args.transcript_dir.resolve()
         approved = load_aliases(transcript, args.speaker_aliases)
         root = Path(os.environ.get("MEETING_SUMMARIES_ROOT", str(Path(__file__).resolve().parents[1] / "meeting-summaries"))).expanduser()
         output_dir = root / transcript.name
-        if args.command == "suggest":
+        if args.command in {"inspect-turns", "approve-turn", "remove-turn", "turn-conflicts"}:
+            if args.command == "remove-turn":
+                remove_turn(transcript, args.turn_id)
+                print("Removed the explicitly selected private turn correction.")
+                return 0
+            catalog = turn_catalog(transcript)
+            if args.command == "approve-turn":
+                approve_turn(transcript, catalog, args.turn_id, args.name)
+                print("Approved the explicitly selected source turn. Rerun meeting postprocessing.")
+                return 0
+            document = correction_document(transcript)
+            conflicts = correction_conflicts(catalog, document, approved)
             output_dir = args.output_dir or output_dir
-            index = transcript / "chunks_out" / "transcript_chunks.jsonl"
-            chunks = [json.loads(line) for line in index.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
-            chunks = speaker_input(chunks)
+            if args.command == "turn-conflicts":
+                events = source_events(catalog["turns"], approved, load_roster(transcript))
+                for label in sorted({event["speaker_label"] for event in events}):
+                    items = [event for event in events if event["speaker_label"] == label]
+                    names = sorted({name for event in items for name in event["candidate_names"]})
+                    if len(names) > 1 or any(event.get("uncertain_source_attribution") for event in items):
+                        conflicts.append({"type": "uncertain_or_conflicting_source_identity", "speaker_label": label, "candidates": names, "turn_ids": sorted({tid for event in items for tid in event["target_turn_ids"]}), "blocking": False})
+                payload = {"meeting_id": catalog["meeting_id"], "source_digest": catalog["source_digest"], "conflicts": conflicts}
+                filename = CONFLICTS_FILE
+            else:
+                rows = effective_turns(catalog, document, approved) if not any(row["blocking"] for row in conflicts) else catalog["turns"]
+                if args.turn_id:
+                    rows = [row for row in rows if row["turn_id"] == args.turn_id]
+                    if not rows:
+                        raise ValueError("Requested source turn is absent or redacted")
+                payload, filename = {**catalog, "turns": rows, "conflicts": conflicts}, TURNS_FILE
+            write_private_json(output_dir / filename, payload)
+            print(f"Wrote private {filename}; inspect locally.")
+        elif args.command == "suggest":
+            output_dir = args.output_dir or output_dir
+            source_chunks = read_index(transcript)
+            chunks = speaker_input(source_chunks)
+            if (output_dir / TURNS_FILE).exists():
+                fresh_catalog = turn_catalog(transcript, source_chunks)
+                write_private_json(output_dir / TURNS_FILE, fresh_catalog)
+            (output_dir / CONFLICTS_FILE).unlink(missing_ok=True)
             report = build_speaker_suggestions(chunks, approved, load_roster(transcript, args.speaker_roster), str(transcript))
             write_private_json(output_dir / PRIVATE_SUGGESTIONS_FILENAME, report)
             if args.llm:
                 defaults = argparse.Namespace(profile="meeting", map_model=None, reduce_model=args.reduce_model, map_num_ctx=None, reduce_num_ctx=args.reduce_num_ctx)
                 resolve_model_defaults(defaults)
-                report = review_speakers(report, chunks, approved, load_roster(transcript, args.speaker_roster), ollama_url=args.ollama_url, model=args.speaker_suggestion_model or defaults.reduce_model, num_ctx=defaults.reduce_num_ctx)
+                if args.speaker_review_mode == "legacy":
+                    report = review_speakers(report, chunks, approved, load_roster(transcript, args.speaker_roster), ollama_url=args.ollama_url, model=args.speaker_suggestion_model or defaults.reduce_model, num_ctx=defaults.reduce_num_ctx)
+                else:
+                    catalog = turn_catalog(transcript, source_chunks)
+                    turns = effective_turns(catalog, correction_document(transcript), approved)
+                    write_private_json(output_dir / TURNS_FILE, {**catalog, "turns": turns})
+                    report = review_turns(report, turns, approved, load_roster(transcript, args.speaker_roster), ollama_url=args.ollama_url, model=args.speaker_suggestion_model or defaults.reduce_model, options=settings(args.speaker_review_num_ctx, args.speaker_review_tokenizer, args.speaker_review_window))
                 write_private_json(output_dir / PRIVATE_SUGGESTIONS_FILENAME, report)
                 print(f"Local LLM review: {report['llm_review']['status']}; inspect the private review.")
             print("Wrote private speaker-suggestions.json (advisory only; aliases unchanged).")

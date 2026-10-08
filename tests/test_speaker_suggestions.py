@@ -218,6 +218,10 @@ class SpeakerCommandTests(unittest.TestCase):
         return transcript
 
     def run_command(self, root, argv):
+        # Keep the existing single-call grounding/approval regressions on their
+        # compatibility route; test_speaker_turns covers the new two-pass default.
+        if "--llm" in argv and "--speaker-review-mode" not in argv:
+            argv = [*argv, "--speaker-review-mode", "legacy"]
         with patch.object(sys, "argv", ["speaker_review", *map(str, argv)]), patch.dict(os.environ, {"MEETING_SUMMARIES_ROOT": str(root / "outputs")}, clear=True), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             return command.main()
 
@@ -315,7 +319,7 @@ class SpeakerPipelineTests(unittest.TestCase):
         def response(**kwargs):
             calls.append(kwargs)
             return "# Model output\n- SPEAKER_03 offered comments."
-        argv = ["summary", str(transcript), "--profile", profile] + (["--suggest-speakers"] if enabled else []) + (["--suggest-speakers-llm"] if llm else []) + (options or [])
+        argv = ["summary", str(transcript), "--profile", profile] + (["--suggest-speakers"] if enabled else []) + (["--suggest-speakers-llm", "--speaker-review-mode", "legacy"] if llm else []) + (options or [])
         with patch.object(sys, "argv", argv), patch.dict(os.environ, {"MEETING_SUMMARIES_ROOT": str(root / "outputs"), "LESSON_SUMMARIES_ROOT": str(root / "outputs")}, clear=True), patch.object(engine, "call_ollama", side_effect=response), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             status = engine.main()
         self.assertEqual(index.read_text(), original)
