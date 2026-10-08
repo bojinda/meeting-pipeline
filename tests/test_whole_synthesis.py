@@ -96,6 +96,18 @@ class FakeModel:
             data = {"items": evidence}
             if self.mutate_evidence:
                 self.mutate_evidence(data, records)
+            compact = []
+            for row in data["items"]:
+                primary = next((quote for quote in row["quotes"] if quote["text"] == row["statement"]), row["quotes"][0])
+                entry = {key: row[key] for key in ("id", "kind", "section", "owners", "mover", "seconder", "outcome")}
+                entry.update(primary_record_id=primary["record_id"], supporting_record_ids=[quote["record_id"] for quote in row["quotes"] if quote is not primary])
+                # Free claims/quotes cannot be smuggled into the new protocol.
+                if row["statement"] != primary["text"]:
+                    entry["statement"] = row["statement"]
+                if any(quote["record_id"] in {record["id"] for record in records} and quote["text"] != next(record["text"] for record in records if record["id"] == quote["record_id"]) for quote in row["quotes"]):
+                    entry["quotes"] = row["quotes"]
+                compact.append(entry)
+            data = {"format": "meeting-evidence-v2", "items": compact}
         else:
             evidence = payload["validated_evidence"]
             data = {}
@@ -217,8 +229,15 @@ class WholeSynthesisTests(unittest.TestCase):
                         record = next(row for row in records if "old historical report" in row["text"])
                         action.update(section=BUSINESS, statement=record["text"], quotes=[{"record_id": record["id"], "text": record["text"]}])
                 status, output, _, _ = invoke(root, directory, FakeModel(mutate_evidence=mutate))
-                self.assertEqual(status, 1)
-                self.assertEqual(publication_payload(output)["documents"], [])
+                if case == "third_party":
+                    self.assertEqual(status, 0)
+                    actions = (output / "action-items.md").read_text()
+                    self.assertIn("I will send the updated safety notice off", actions)
+                    self.assertNotIn("Morgan", actions)
+                    self.assertNotIn("office approves", actions)
+                else:
+                    self.assertEqual(status, 1)
+                    self.assertEqual(publication_payload(output)["documents"], [])
 
     def test_missing_identities_are_preserved_and_flagged_without_using_suggestions(self):
         with tempfile.TemporaryDirectory() as root:

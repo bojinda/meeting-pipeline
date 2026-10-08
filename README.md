@@ -818,11 +818,16 @@ are identified as source coordinates, not invented precise sentence timestamps.
 
 Two principal model stages are used:
 
-1. Extract structured topics, motions, decisions, actions, outstanding issues,
-   health/safety concerns, qualifications/disagreements and recap, citing exact
-   classified record IDs and full verbatim source quotations. This first version
-   deliberately uses extractive statements: a paraphrase or shortened condition
-   is rejected. Named motion roles and outcomes need explicit source evidence;
+1. Scan the entire meeting, then extract substantive evidence in priority order:
+   motions, explicit actions, decisions, outstanding issues, health/safety,
+   qualifications/disagreements, historical recap, then other discussion topics.
+   A topic represents a meaningful subject supported by relevant records, rather
+   than one item per sentence/turn. The `meeting-evidence-v2` response contains
+   `id`, `kind`, canonical `section`, `primary_record_id`,
+   `supporting_record_ids`, `owners`, `mover`, `seconder` and `outcome`.
+   It does **not** return duplicate statements/quotation bodies or free-text topic
+   titles. Python hydrates exact text and quotations from the immutable originals
+   before applying the established source validation. Named motion roles and outcomes need explicit source evidence;
    a meeting ending is not evidence that a motion carried. Actions need supported
    undertakings/assignments for every owner, with existing outreach/proposal
    guards and actor/recipient boundaries. Explicit collective undertakings with no
@@ -847,8 +852,10 @@ continuity within or across such turns must not be assumed.
 `whole-source.json` retains complete original classified records, timing/provenance,
 source-turn IDs, original line coordinates, and the exact `compact_to_original`
 map plus a binding digest. Model citations use canonical decimal JSON strings
-(e.g. `"1"`); the validator resolves them to original record IDs and compares the
-quote with the **original record body**. Unknown/noncanonical IDs, missing rows,
+(e.g. `"1"`) in primary/supporting reference fields. The validator resolves them
+to original record IDs and restores **original record bodies**, never model
+paraphrases. Full quotations and original provenance remain in private evidence;
+unsupported category/role/owner interpretations are still rejected. Unknown/noncanonical IDs, missing rows,
 collisions, changed speaker/section boundaries, and changed quotations fail closed.
 No content, qualification, ownership rule or output reserve is removed to fit.
 
@@ -881,7 +888,15 @@ Preflight can be run before deciding whether to approve another live experiment.
 
 Evidence output has an explicit contract distinct from compact source encoding:
 `item.id` is unique and matches `^E[0-9]{1,6}$` (e.g. `E1`, `E15`). Source
-citations remain canonical decimal strings such as `quotes.record_id="1"`.
+citations in v2 are canonical decimal strings such as `primary_record_id="1"`;
+`supporting_record_ids` carries additional relevant evidence without copied text.
+The primary record selects the actual source assertion/undertaking, not a filler
+turn. Supporting quotations are restored verbatim, preserving each speaker;
+they may include necessary conditions and disagreement. There is no arbitrary
+item/support-reference cap in v2: bounded generation remains authoritative and
+a limit hit always fails closed. Exact duplicate topic groups are reported and
+rejected rather than silently discarded. Legacy statement/quotation responses
+remain supported by offline validation for earlier retained artifacts only.
 Output `item.section` uses the full names `current_meeting_business`,
 `previous_meeting_recap`, or `adjournment`; input B/R/A codes are **not** valid
 output section values. Schema and validator share the ID pattern and section
@@ -930,11 +945,28 @@ raw responses through this helper.
 The output remains a draft for operator review. Existing action filtering, motion
 cleanup, formatting, normalization, private-reference removal and deterministic
 QA are reused. Unresolved speakers and ambiguous roles remain flagged. Clear
-source commitments omitted by extraction add QA findings instead of invented
-replacement tasks. Full input coverage means all eligible text was supplied;
+source commitments and formal motion cues omitted by extraction add private QA
+findings instead of invented replacement tasks. For actions only, Python may
+restore the existing commitment parser's exact own-task span before a later
+third-party step, while retaining the full original record in private quotations.
+That span preserves its conditions and qualifications; it cannot reassign the
+undertaking to the later actor. Full input coverage means all eligible text was supplied;
 it does **not** certify perfect semantic recall. Compare evidence, QA and documents.
 This experiment tests completeness/source accuracy before allowing free-form
 paraphrased synthesis.
+
+`whole-run.json` separates `context_coverage` (eligible records submitted) from
+`semantic_evidence_coverage`. It records accepted counts by category,
+duplicate/rejected counts, the allotted generation budget, estimated response
+tokens and actual Ollama `eval_count`, plus private omitted commitment/motion
+record IDs. Known source checks cover clear commitments and formal motion cues;
+passing them never certifies complete semantic recall of every substantive issue,
+condition, disagreement or topic. Missing evidence is disclosed as needing
+operator review. If generation is truncated, accepted counts stay zero and
+rejection/duplicate counts remain unknown rather than parsing partial JSON.
+There are still exactly two principal inference stages, no retries and no
+automatic speaker assignment. The 98,304 context, Q8 server configuration and
+16,384 extraction reserve are unchanged.
 
 Context planning reserves the full schema, instructions, a 1,024-token framing
 allowance, up to 16,384 extraction tokens and up to 8,192 document-plan tokens.
