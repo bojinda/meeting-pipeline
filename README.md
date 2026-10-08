@@ -699,7 +699,7 @@ temperature zero, with a 600-second HTTP timeout and no automatic retry.
 If discovery fails or finds no candidates, verification is skipped.
 
 Input budgeting includes instructions, JSON schema, roster, a 1,024-token framing
-reserve, and a structured-output reserve (up to 8,192 tokens for discovery and
+reserve, and a structured-output reserve (up to 16,384 tokens for discovery and
 4,096 for verification). Configure a **matching local** `tokenizer.json` with
 `SPEAKER_REVIEW_TOKENIZER` or `--speaker-review-tokenizer` to count model tokens;
 this requires the optional Python `tokenizers` package in the processing environment.

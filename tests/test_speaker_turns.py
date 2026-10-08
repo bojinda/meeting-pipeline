@@ -328,6 +328,8 @@ class TwoPassTests(unittest.TestCase):
             self.assertEqual(model.call_count, 2)
             discovery, verification = [call.args[0] for call in model.call_args_list]
             self.assertEqual(discovery["num_ctx"], 98304)
+            self.assertEqual(discovery["num_predict"], 16384)
+            self.assertLessEqual(verification["num_predict"], 4096)
             self.assertLess(verification["num_ctx"], 98304)
             self.assertIn("Independently verify", verification["system"])
             proposed = json.loads(verification["prompt"])["proposed_assignments"]
@@ -337,6 +339,72 @@ class TwoPassTests(unittest.TestCase):
             self.assertEqual(result["llm_review"]["assignments"][0]["status"], "grounded_advisory")
             self.assertFalse((directory / turns.CORRECTIONS_FILE).exists())
             self.assertFalse((directory / "speaker_aliases.json").exists())
+
+    def test_full_coverage_with_large_input_and_reserved_discovery_output(self):
+        text = SOURCE + "\n" + "\n".join(f"[SPEAKER_04] Routine report {i}." for i in range(454))
+        class Counter:
+            method = "synthetic_token_counter"
+            def __call__(self, text):
+                return 75943 if '"transcript_turns"' in text else len(text.encode("utf-8"))
+        with tempfile.TemporaryDirectory() as root:
+            _, report, rows = self.setup_review(root, text)
+            def completion(request):
+                return {"response": model_reply(request), "prompt_eval_count": 75943, "done_reason": "stop"}
+            model = Mock(side_effect=completion)
+            counter = Counter()
+            result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(98304), call=model, counter=counter)
+            self.assertEqual(len(rows), 458)
+            self.assertEqual(model.call_count, 2)
+            coverage = result["llm_review"]["coverage"]
+            self.assertTrue(coverage["complete"])
+            self.assertEqual(coverage["window_count"], 1)
+            self.assertEqual(len(coverage["included_turn_ids"]), 458)
+            self.assertEqual(result["llm_review"]["status"], "completed")
+            for call in model.call_args_list:
+                request = call.args[0]
+                self.assertLessEqual(review._cost(request["prompt"], request["system"], request["format"], counter, request["num_predict"]), request["num_ctx"])
+            system = model.call_args_list[0].args[0]["system"]
+            self.assertIn("Do not duplicate candidate proposals", system)
+            self.assertIn("Preserve conflicting evidence", system)
+
+    def test_discovery_output_limit_skips_verification_even_with_valid_json(self):
+        for valid_json in (True, False):
+            with self.subTest(valid_json=valid_json), tempfile.TemporaryDirectory() as root:
+                directory, report, rows = self.setup_review(root)
+                raw = json.dumps({"candidates": [claim(rows[1]["turn_id"], "Taylor Morgan")]}) if valid_json else '{"candidates":['
+                model = Mock(return_value={"response": raw, "done_reason": "length", "eval_count": 16384})
+                result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(98304), call=model)
+                model.assert_called_once()
+                self.assertEqual(model.call_args.args[0]["num_predict"], 16384)
+                self.assertEqual(result["llm_review"]["status"], "incomplete")
+                self.assertEqual(result["llm_review"]["passes"][0]["diagnostics"]["failure_category"], "generation_token_limit")
+                self.assertEqual(result["llm_review"]["assignments"], [])
+                self.assertEqual(result["suggestions"], report["suggestions"])
+                self.assertFalse((directory / turns.CORRECTIONS_FILE).exists())
+                self.assertFalse((directory / "speaker_aliases.json").exists())
+
+    def test_larger_output_reserve_moves_over_budget_input_to_explicit_windows(self):
+        text = SOURCE + "\n" + "\n".join(f"[SPEAKER_04] Routine report {i}." for i in range(12))
+        class Counter:
+            method = "synthetic_token_counter"
+            def __call__(self, text):
+                if '"transcript_turns"' in text:
+                    return len(json.loads(text)["transcript_turns"]) * 5400
+                return len(text.encode("utf-8"))
+        with tempfile.TemporaryDirectory() as root:
+            _, report, rows = self.setup_review(root, text)
+            counter = Counter()
+            self.assertLessEqual(review._cost(review._prompt(rows, []), review.DISCOVERY_SYSTEM, review.schema(), counter, 8192), 98304)
+            self.assertGreater(review._cost(review._prompt(rows, []), review.DISCOVERY_SYSTEM, review.schema(), counter, 16384), 98304)
+            model = Mock(return_value='{"candidates":[]}')
+            result = review.run_two_pass(report, rows, {}, [], model="local", ollama_url="http://localhost", options=review.settings(98304), call=model, counter=counter)
+            coverage = result["llm_review"]["coverage"]
+            self.assertFalse(coverage["complete"])
+            self.assertGreater(coverage["window_count"], 1)
+            self.assertTrue(coverage["omitted_turn_ids"])
+            request = model.call_args.args[0]
+            self.assertEqual(request["num_predict"], 16384)
+            self.assertLessEqual(review._cost(request["prompt"], request["system"], request["format"], counter, request["num_predict"]), request["num_ctx"])
 
     def test_context_env_and_cli_override_only_speaker_review(self):
         with patch.dict(os.environ, {"SPEAKER_REVIEW_NUM_CTX": "65536", "MEETING_REDUCE_NUM_CTX": "32768"}, clear=True):

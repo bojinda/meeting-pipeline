@@ -24,7 +24,14 @@ break conversational links. Approved turn corrections are authoritative.
 Retain conflicting names; uncertainty and merged conversations require manual
 review. Return only the requested JSON schema. No identity is auto-approved.
 """
-DISCOVERY_SYSTEM = SYSTEM + "\nDiscover candidate identities and conflicting turn assignments from the wider conversation."
+DISCOVERY_SYSTEM = SYSTEM + """
+Discover actual speaker-name relationships and conflicting turn assignments from
+wider conversation. Cite exact source turn IDs for each relationship. Keep output
+concise and evidence-focused: emit each distinct supported relationship once,
+using its relevant evidence IDs. Do not duplicate candidate proposals or emit a
+candidate for every routine turn. Preserve conflicting evidence as conflicts;
+never discard uncertainty or weaken grounding to shorten the answer.
+"""
 VERIFY_SYSTEM = SYSTEM + "\nIndependently verify each proposed assignment against source evidence. Ignore discovery confidence. Return supported, unsupported, or uncertain; do not choose a winner in a conflict."
 FIELDS = {
     "turn_id": {"type": "string"}, "name": {"type": ["string", "null"], "maxLength": 120},
@@ -231,7 +238,7 @@ def run_two_pass(report, turns, aliases, roster, *, model, ollama_url, options, 
         legacy._local_model(model)
         counter = counter or TokenCounter(options["tokenizer"])
         context = options["num_ctx"]
-        output = min(8192, max(1024, context // 8))
+        output = min(16384, max(1024, context // 6))
         planned, oversized = windows(turns, roster, context, counter, output)
         index = options["window"]
         if not turns:
