@@ -147,6 +147,60 @@ class GroupingTests(unittest.TestCase):
                 self.assertEqual(plan["groups"], [["P1"], ["P2"], ["P3"]])
                 self.assertTrue(plan["coverage"]["complete"])
 
+    def test_planner_keeps_lengthy_report_questions_and_corrections_together(self):
+        rows = [row(1, "[Taylor] Equipment report. " + "inspection detail " * 900),
+                row(2, "[Morgan] Does that include the replacement equipment?"),
+                row(3, "[Taylor] Yes, with a correction to the earlier count. " + "report clarification " * 500),
+                row(4, "[Chair] Next topic: convention arrangements.")]
+        calls = []
+        def call(*args):
+            calls.append(args)
+            self.assertIn('return {"ends":["P3","P4"]}', args[1])
+            self.assertIn("NOT inherently topic boundaries", args[1])
+            return response(["P3", "P4"])
+        plan = self.plan(rows, settings(planner=True, map_context=98304), call=call)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(plan["groups"], [["P1", "P2", "P3"], ["P4"]])
+        comparison = plan["planner"]["boundary_comparison"]
+        self.assertEqual(comparison["removed_end_ids"], ["P1"])
+        self.assertEqual(comparison["segmentation_change"], "coarser_than_deterministic")
+        self.assertFalse(comparison["grouping_improvement_demonstrated"])
+
+    def test_planner_preserves_short_discussion_at_genuine_topic_transition(self):
+        rows = [row(1, "[Taylor] The equipment check is complete."),
+                row(2, "[Taylor] Next topic: convention arrangements. Can two delegates attend?"),
+                row(3, "[Morgan] Yes, two delegates can attend.")]
+        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P1", "P3"]))
+        self.assertEqual(plan["groups"], [["P1"], ["P2", "P3"]])
+        self.assertEqual(plan["planner"]["boundary_comparison"]["segmentation_change"], "same_as_deterministic")
+
+    def test_singleton_planner_is_valid_without_demonstrating_grouping_improvement(self):
+        rows = [row(1, "[Taylor] Equipment report begins."), row(2, "[Taylor] More equipment detail."),
+                row(3, "[Taylor] A correction to the equipment count.")]
+        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P1", "P2", "P3"]))
+        self.assertEqual(plan["planner"]["status"], "validated")
+        self.assertEqual(plan["groups"], [["P1"], ["P2"], ["P3"]])
+        self.assertTrue(plan["coverage"]["complete"])
+        comparison = plan["planner"]["boundary_comparison"]
+        self.assertTrue(comparison["structurally_valid"])
+        self.assertEqual(comparison["deterministic_group_count"], 1)
+        self.assertEqual(comparison["planner_group_count"], 3)
+        self.assertEqual(comparison["singleton_group_count"], 3)
+        self.assertEqual(comparison["added_end_ids"], ["P1", "P2"])
+        self.assertEqual(comparison["segmentation_change"], "all_singletons_no_consolidation")
+        self.assertFalse(comparison["grouping_improvement_demonstrated"])
+        self.assertEqual(len(self.apply(plan, rows)), 3)
+
+    def test_fewer_groups_do_not_certify_semantic_quality(self):
+        rows = [row(1, "[Taylor] Equipment report."), row(2, "[Morgan] A separate convention report.")]
+        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P2"]))
+        comparison = plan["planner"]["boundary_comparison"]
+        self.assertTrue(comparison["structurally_valid"])
+        self.assertEqual(comparison["deterministic_group_count"], 2)
+        self.assertEqual(comparison["planner_group_count"], 1)
+        self.assertFalse(comparison["grouping_improvement_demonstrated"])
+        self.assertIn("source_review_required", comparison["quality_assessment"])
+
     def test_section_gap_and_over_budget_planner_groups_are_rejected(self):
         for rows, config, blocked in (
             ([row(1, "[Taylor] Historical.", RECAP), row(2, "[Morgan] Current.")], settings(planner=True), set()),
