@@ -9,7 +9,10 @@ Rules:
 - Preserve explicit first-person commitments, including approvals, follow-up, outreach, arrangements for a team's participation, and preparation/sharing of information. A qualified undertaking to try remains an action to attempt the task; preserve its qualification instead of guaranteeing a result.
 - A report that someone has already messaged, contacted, or requested information from another person is completed outreach, not a new task for the recipient. Do not infer an assignment to reply or provide information unless that person is explicitly assigned it or commits to it in this meeting.
 - Distinguish explicit future contact assignments or commitments from reports of completed contacts. Keep supported future outreach tasks; do not infer new recipient tasks from outreach that has already occurred.
-- Only list a decision if a choice is clearly made, confirmed, or approved.
+- Distinguish who directs work, who administers/performs it, and who is its subject. In testing, an employee helping administer a test is not necessarily the employee being tested. Do not reverse actor/object roles; retain uncertainty in fragmented ASR.
+- Preserve qualified change sequences: initial approximate reductions, subsequent reinstatement/reassignment, remaining losses, and later partial restoration. Keep numerical corrections, qualifications and timing together rather than treating the initial figure as the final state.
+- Preserve an explicit undertaking to raise a previously discussed matter at a future meeting; retain its local topic and responsible speaker without assigning the proposed task to its beneficiary. Preserve explicitly reported pending commitments by a named third party as reported commitments, not promises by the reporting speaker.
+- Only list a decision if a choice is clearly made, confirmed, or approved AT THIS meeting. Reported company policies, prior decisions and conference votes belong under Topics/Important notes with their origin and timing; they are not new decisions or motions of this meeting.
 - Only list a motion or proposal if one is explicitly proposed.
 - Named role announcements identify the explicitly named mover and seconder, even when the chair or another participant reports them. The announcing speaker is not the seconder. Preserve the announced names and record Carried only if the outcome is explicit.
 - Do not convert discussion topics, examples, jokes, hypotheticals, media shown, things under review, or things people talk about into action items.
@@ -30,7 +33,10 @@ Section rules:
 - Historical decisions, motions, and tasks must stay historical. Do not present them as new business or new assignments.
 - A chair's intention to start with a recap is not evidence that intervening current discussion is historical. Respect supplied section labels; an explicit retrospective report can resume recap after an interruption.
 - For a recap portion, put the historical account under Topics and Important notes; write None noted in the current Decisions, Motions, and Action items sections.
-- Use the supplied names exactly; retain speaker labels where no name is supplied. Do not guess identities.
+- Use only approved supplied speaker identities. A name mentioned, addressed or announcing a motion does not identify a SPEAKER_XX label. Do not add name/label pairings or expand initials/roles into names. Mixed or unresolved passages keep their original labels. Explicitly named motion roles or reported task owners may be recorded without treating them as global speaker aliases.
+- An adjournment section or proposed/seconded adjournment motion does not establish that the meeting formally ended. Record only explicit motion outcomes and closing statements; retain substantive discussion continuing after the motion.
+- Keep material operational/member issues, safety concerns, formal motions, assignments and qualifications. Omit incidental vacations, greetings, device problems and unrelated personal/medical details. Protect member confidentiality; preserve necessary case facts without unnecessary identifying details.
+- Open questions must be substantive questions or unresolved issues actually raised, not speculative questions generated from missing information. Avoid repeating the same fact in Topics and Important notes; use Important notes for additional material qualifications.
 
 Transcript chunk:
 {chunk_text}

@@ -41,24 +41,43 @@ class AdjournmentAnnouncement:
 
 
 def adjournment_announcements(source: str) -> list[AdjournmentAnnouncement]:
-    lines = [re.sub(r"^\[[^\]]+\]\s*", "", line) for line in source.splitlines() if line.strip()]
+    turns = [re.match(r"^\[([^\]]+)\]\s*(.*)$", line) for line in source.splitlines() if line.strip()]
+    original = [line for line in source.splitlines() if line.strip()]
+    speakers = [turn[1] if turn else "" for turn in turns]
+    lines = [turn[2] if turn else line for turn, line in zip(turns, original)]
     # ASR can split acknowledgments into separate turns between the cue and
     # its named announcement. Ignore only filler in this evidence view; keep
     # the existing bounds on substantive context and the source unchanged.
-    lines = [line for line in lines if not _ACKNOWLEDGMENT.fullmatch(line)]
+    kept = [i for i, line in enumerate(lines) if not _ACKNOWLEDGMENT.fullmatch(line)]
+    speakers, lines = [speakers[i] for i in kept], [lines[i] for i in kept]
     announcements = []
     for index, line in enumerate(lines):
         if re.search(r"\b(?:if|hypothetically|maybe|joking|joke|would be)\b", line, re.IGNORECASE):
             continue
         roles = dict(role_names(line))
+        role_end = index
+        if len(roles) == 1:
+            for following in range(index + 1, min(len(lines), index + 5)):
+                if speakers[following] != speakers[index]:
+                    break
+                extra = dict(role_names(lines[following]))
+                if extra and re.search(r"\b(?:if|hypothetically|maybe|joking|joke|would be)\b", lines[following], re.IGNORECASE):
+                    break
+                if extra and not set(extra) & set(roles):
+                    roles.update(extra)
+                    role_end = following
+                    break
+                filler = lines[following].strip(" .!")
+                if filler not in roles.values() and not re.fullmatch(r"perfect|thanks|thank you", filler, re.IGNORECASE):
+                    break
         if not all(roles.get(role) for role in ("mover", "seconder")):
             continue
         if any(SPEAKER_LABEL.search(name) or not re.fullmatch(r"[A-Z][\w'’.-]*(?:\s+[A-Z][\w'’.-]*){0,3}", name) for name in roles.values()):
             continue
-        context = " ".join(lines[max(0, index - 2):index + 2])
+        context = " ".join(lines[max(0, index - (4 if role_end != index else 2)):role_end + 2])
         if not re.search(r"\badjourn(?:ment)?\b", context, re.IGNORECASE):
             continue
-        outcome_text = " ".join(lines[index:index + 3])
+        outcome_text = " ".join(lines[index:role_end + 3])
         outcome = None
         for phrase in ("Not carried", "Defeated", "Withdrawn", "Tabled"):
             if re.search(r"\b" + phrase + r"\b", outcome_text, re.IGNORECASE):
@@ -136,6 +155,26 @@ def _neutral_adjournment_prose(line: str) -> str:
     return "".join(_neutral_adjournment_sentence(part) for part in re.split(r"(?<=[.!?])(\s+)", line))
 
 
+def _explicit_closing(source: str) -> bool:
+    for line in source.splitlines():
+        body = re.sub(r"^\[[^\]]+\]\s*", "", line)
+        if re.match(r"^(?:(?:okay|ok|so|now)[,.]?\s+)?(?:" + _CLOSE + r"|we (?:are|stand) adjourned|we['’]re adjourned|this concludes the meeting)[.!]?$", body, re.IGNORECASE):
+            return True
+    return False
+
+
+def _neutral_closing(line: str) -> str:
+    def sentence(part):
+        if re.search(r"\b(?:if|whether|would|could|might|hypothetically)\b", part, re.IGNORECASE):
+            return part
+        part = re.sub(r"\b" + _CLOSE + r"(?: on (?:a )?motion)?\b", "An adjournment motion was recorded", part, flags=re.IGNORECASE)
+        if re.search(r"\b(?:meeting|session)\b", part, re.IGNORECASE) and re.search(r"\bbefore adjourning\b", part, re.IGNORECASE):
+            part = re.sub(r"\bclosed with\b", "included", part, flags=re.IGNORECASE)
+            part = re.sub(r"\s+before adjourning\b", "", part, flags=re.IGNORECASE)
+        return part
+    return "".join(sentence(part) for part in re.split(r"(?<=[.!?])(\s+)", line))
+
+
 def correct_adjournment_roles(content: str, source: str) -> str:
     announcements = adjournment_announcements(source)
     if len(announcements) != 1:
@@ -143,6 +182,7 @@ def correct_adjournment_roles(content: str, source: str) -> str:
     lines = []
     historical = False
     in_motion = False
+    closed = _explicit_closing(source)
     for line in content.splitlines():
         if re.match(r"^##\s+", line):
             historical = "recap of previous meeting" in line.casefold()
@@ -163,6 +203,7 @@ def correct_adjournment_roles(content: str, source: str) -> str:
         elif in_motion and not line.strip():
             lines.append(line)
         else:
-            lines.append(_neutral_adjournment_prose(line) if announcements[0].outcome is None else line)
+            neutral = _neutral_adjournment_prose(line) if announcements[0].outcome is None else line
+            lines.append(neutral if closed else _neutral_closing(neutral))
             in_motion = False
     return "\n".join(lines)

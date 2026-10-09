@@ -1,6 +1,14 @@
 Using the ordered chunk summaries below, write a concise executive summary in markdown.
 
 Rules:
+- Preserve only approved supplied speaker identities; do not identify unresolved labels from names mentioned elsewhere or invent name/label annotations. Explicitly named motion roles and reported task owners are separate from speaker identity.
+- Preserve source-supported action owners, conditions, recipients and deadlines consistently across documents. A named person's reported pending undertaking remains a reported undertaking; do not assign it to the reporting speaker. A commitment to raise a topic at the next meeting is distinct from implementing the proposed outcome.
+- Meeting identity must come from explicit opening identification or supplied metadata, not discussion topics or committee reports. Use a generic meeting title when identity is unspecified; discussing health and safety does not make this a Health & Safety Committee meeting.
+- Distinguish the directing authority, people administering work/tests, and people subject to them. Never reverse those roles; preserve uncertainty where ASR is unclear.
+- Retain substantive restructuring/change chronology, including initial approximate reductions, reinstatement/reassignment, remaining losses and later partial restoration. Do not drop the qualified final position when compressing a report.
+- Reported prior company decisions and conference votes stay labelled with their origin; they are not decisions or motions made at this meeting.
+- A proposed/seconded adjournment motion or an adjournment section is not proof of formal closure. Do not say the meeting adjourned unless an explicit closing statement supports it; retain substantive discussion after the motion.
+- Omit incidental personal details and duplicated notes. Include only significant unresolved issues actually raised, not speculative open questions. Preserve material safety concerns, motions, recorded outcomes, disagreements and qualifications while protecting member confidentiality.
 - Be conservative and do not infer tasks, decisions, or motions from discussion alone.
 - Preserve chronology.
 - If chunk summaries contain uncertainty, preserve that uncertainty.

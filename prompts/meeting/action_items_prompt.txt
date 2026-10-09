@@ -1,6 +1,8 @@
 Using the ordered chunk summaries below, write an action-items document in markdown.
 
 Rules:
+- Preserve only approved supplied speaker identities; do not identify unresolved labels from names mentioned elsewhere or invent name/label annotations. Explicitly named motion roles and reported task owners are separate from speaker identity.
+- Preserve source-supported action owners, conditions, recipients and deadlines consistently across documents. A named person's reported pending undertaking remains a reported undertaking; do not assign it to the reporting speaker. A commitment to raise a topic at the next meeting is distinct from implementing the proposed outcome.
 - Only include an item if it is explicitly assigned, requested, volunteered for, scheduled, or clearly agreed.
 - Do not turn topics of discussion into action items.
 - Do not infer ownership.

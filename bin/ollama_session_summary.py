@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -13,14 +14,14 @@ from typing import Any
 from meeting_postprocess.aliases import load_aliases
 from meeting_postprocess.gpu_admission import managed_generate, approved_input
 from meeting_postprocess.actions import filter_completed_request_tasks
-from meeting_postprocess.commitments import commitment_evidence
+from meeting_postprocess.commitments import commitment_evidence, source_context_evidence
 from meeting_postprocess.motions import adjournment_announcements, correct_adjournment_roles
-from meeting_postprocess.normalization import prepare_text
-from meeting_postprocess.qa import check_minutes, write_report
+from meeting_postprocess.normalization import prepare_text, clean_speaker_annotations
+from meeting_postprocess.qa import check_minutes, write_report, check_action_consistency, check_meeting_identity
 from meeting_postprocess.rendering import insert_recap, strip_chunk_references
 from meeting_postprocess.redaction import redact_chunks, write_private_redactions
 from meeting_postprocess.publication import strip_private_references
-from meeting_postprocess.sections import ADJOURNMENT, BUSINESS, RECAP, prepare_chunks
+from meeting_postprocess.sections import ADJOURNMENT, BUSINESS, RECAP, prepare_chunks, _utterances
 from meeting_postprocess.speaker_suggestions import PRIVATE_SUGGESTIONS_FILENAME, build_speaker_suggestions, load_roster, speaker_input, write_private_json
 from meeting_postprocess.speaker_turn_review import review_turns, settings as speaker_review_settings
 from meeting_postprocess.speaker_review import review_speakers
@@ -375,6 +376,7 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     summaries_dir.mkdir(parents=True, exist_ok=True, **({"mode": 0o700} if args.chunk_plan else {}))
 
     aliases: dict[str, str] = {}
+    approved_passages = []
     redaction_warnings = []
     commitment_context_blocked = set()
     if profile == "meeting":
@@ -411,6 +413,9 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
                 catalog = turn_catalog(transcript_dir, chunks)
                 corrections = correction_document(transcript_dir, correction_path)
                 turns = effective_turns(catalog, corrections, aliases)
+                approved_passages = [(turn["source_speaker"], prepare_text(turn["approved_turn_name"], aliases), prepare_text(body, aliases))
+                    for turn in turns if turn["approved_turn_name"]
+                    for _, body in _utterances(turn["redacted_text"])]
                 redacted.chunks = corrected_chunks(redacted.chunks, catalog, corrections, aliases)
             if args.suggest_speakers:
                 roster = load_roster(transcript_dir, args.speaker_roster)
@@ -514,6 +519,9 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         if chunk.get("meeting_section") in {BUSINESS, ADJOURNMENT}
     ) if profile == "meeting" else ""
 
+    commitments = commitment_evidence(chunks, include_context=True, blocked_context_source_ids=commitment_context_blocked) if profile == "meeting" else []
+    source_context = source_context_evidence(chunks, commitment_context_blocked) if profile == "meeting" else []
+
     for idx, chunk in enumerate(map_chunks, start=1):
         chunk_id = chunk.get("chunk_id", f"chunk-{idx:03d}")
         print(f"[map] {idx}/{len(map_chunks)} summarizing {chunk_id}", flush=True)
@@ -539,9 +547,9 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             return 1
 
         if profile == "meeting":
-            summary_text = prepare_text(summary_text, aliases)
+            summary_text = prepare_text(clean_speaker_annotations(summary_text, chunk["text"], aliases, approved_passages=approved_passages), aliases)
             if chunk["meeting_section"] in {BUSINESS, ADJOURNMENT}:
-                summary_text = filter_completed_request_tasks(summary_text, current_source, action_sections_only=True)
+                summary_text = filter_completed_request_tasks(summary_text, current_source, action_sections_only=True, future_evidence=commitments)
                 summary_text = correct_adjournment_roles(summary_text, current_source)
 
         row = {
@@ -569,9 +577,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     combined = build_reduce_input(chunk_summaries)
     current_meeting_combined = combined
     recap_combined = ""
-    commitments = []
+    document_findings = []
     if profile == "meeting":
-        commitments = commitment_evidence(chunks, include_context=True, blocked_context_source_ids=commitment_context_blocked)
         combined = build_reduce_input([
             row for row in chunk_summaries if row["meeting_section"] in {RECAP, BUSINESS, ADJOURNMENT}
         ]) or "No historical recap, current meeting business or adjournment was identified."
@@ -600,6 +607,10 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             reduce_prompt += "\n".join("- " + evidence for evidence in commitments)
             reduce_prompt += "\nUse this supplemental source evidence to check for tasks omitted from chunk summaries. These quotations are not pre-approved action items. Preserve speaker ownership, conditions and qualifications such as 'try to'; do not infer additional owners or assignments."
             reduce_prompt += " Keep multi-step workflows separate by actor. Preserve an explicit recipient named in the speaker's own task; leave an unstated recipient unstated. A later third party's delivery or redaction step must not supply the speaker's recipient or redaction duty, even if the map summary merges those steps."
+        if profile == "meeting" and source_context:
+            reduce_prompt += "\n\nSupplemental exact current-source context (not pre-approved facts/actions):\n"
+            reduce_prompt += "\n\n".join(source_context)
+            reduce_prompt += "\nThese exact source excerpts take precedence over conflicting map paraphrases. Use source wording to preserve testing roles, complete qualified change chronology and reported pending undertakings. The reporting speaker is not necessarily the task owner; keep historical decisions separate from decisions made here. Never infer speaker aliases or new facts from these excerpts."
         if profile == "meeting" and output_filename in {"minutes-draft.md", "summary.md"}:
             announcements = adjournment_announcements(current_source)
             if announcements:
@@ -638,21 +649,27 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             return 1
 
         if profile == "meeting":
-            content = prepare_text(content, aliases)
-            if output_filename in {"minutes-draft.md", "summary.md"}:
-                content = correct_adjournment_roles(content, current_source)
+            content = prepare_text(clean_speaker_annotations(content, current_source, aliases, approved_passages=approved_passages), aliases)
+            content = correct_adjournment_roles(content, current_source)
             if output_filename in {"minutes-draft.md", "action-items.md"}:
                 content = filter_completed_request_tasks(
-                    content, current_source, action_sections_only=output_filename == "minutes-draft.md",
+                    content, current_source, action_sections_only=output_filename == "minutes-draft.md", future_evidence=commitments,
                 )
             content = strip_chunk_references(content, [chunk["file_name"] for chunk in (chunks + map_chunks if chunk_plan else chunks) if chunk.get("file_name")])
             content = strip_private_references(content)
+            if output_filename == "summary.md":
+                identity_findings = check_meeting_identity(content, current_source)
+                document_findings.extend(identity_findings)
+                if identity_findings:
+                    content = re.sub(r"^# [^\n]+", "# Meeting Summary", content, count=1, flags=re.MULTILINE)
         out_path = summaries_dir / output_filename
         out_path.write_text(content.rstrip() + "\n", encoding="utf-8")
         print(f"[info] wrote {out_path}", flush=True)
         if profile == "meeting" and output_filename == "minutes-draft.md":
             source = "\n".join(chunk["text"] for chunk in chunks)
             findings = check_minutes(content, source=source) + redaction_warnings
+            findings += check_action_consistency(content, (summaries_dir / "action-items.md").read_text(encoding="utf-8"))
+            findings += document_findings
             write_report(summaries_dir, findings)
             print(f"[qa] {len(findings)} finding(s); see {summaries_dir / 'minutes-qa.md'}", flush=True)
 

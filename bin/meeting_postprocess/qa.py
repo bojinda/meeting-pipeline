@@ -102,6 +102,36 @@ def write_report(directory: Path, findings: list[Finding]) -> None:
     (directory / "minutes-qa.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     lines = ["# Draft Minutes QA", "", "Review required." if findings else "No automated QA findings.", ""]
     for finding in findings:
-        location = f"Line {finding.line}" if finding.line else "Source redaction"
+        location = f"Line {finding.line}" if finding.line else ("Source redaction" if finding.code.startswith("redaction_") else "Document review")
         lines.append(f"- {location} [{finding.code}]: {finding.message}")
     (directory / "minutes-qa.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _consistency_task(text: str) -> tuple[str, ...]:
+    # QA requires full material agreement, unlike proposal-topic matching.
+    # Normalize presentation and a narrow deadline synonym; retain objects,
+    # recipients, negation, conditions, status, numbers and qualifications.
+    plain = text.casefold().replace("’", "'")
+    plain = re.sub(r"\bno later than\b", "by", plain)
+    plain = re.sub(r"\be-mail\b", "email", plain)
+    return tuple(word for word in re.findall(r"\w+(?:'\w+)?", plain) if word not in {"a", "an", "the"})
+
+
+def check_action_consistency(minutes: str, actions: str) -> list[Finding]:
+    from .actions import action_entries, _owner_groups
+    left, right = action_entries(minutes), action_entries(actions)
+    def supported(entry, other):
+        owner, task = entry
+        identities = {identity.casefold() for group in _owner_groups(owner) for identity in group} or {owner.casefold()}
+        return any(identities == ({identity.casefold() for group in _owner_groups(candidate) for identity in group} or {candidate.casefold()})
+                   and _consistency_task(task) == _consistency_task(candidate_task) for candidate, candidate_task in other)
+    missing = sum(not supported(entry, right) for entry in left) + sum(not supported(entry, left) for entry in right)
+    return [Finding("action_inconsistency", 0, "Action ownership/task differs between minutes and standalone action items; verify both against source evidence.", "") for _ in range(missing)]
+
+
+def check_meeting_identity(content: str, source: str) -> list[Finding]:
+    title = next((line for line in content.splitlines() if line.startswith("# ")), "")
+    if not re.search(r"\bcommittee\b", title, re.IGNORECASE):
+        return []
+    explicit = any(re.search(r"^(?:\[[^\]]+\]\s*)?(?:welcome to|this is|this meeting is|meeting of)\b.*\bcommittee\b", line, re.IGNORECASE) for line in source.splitlines()[:12])
+    return [] if explicit else [Finding("unsupported_meeting_identity", 0, "Committee meeting identity is not established by opening identification; discussion topics are not meeting identity.", "")]

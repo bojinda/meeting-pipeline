@@ -196,7 +196,7 @@ def _owner_groups(owner: str) -> tuple[tuple[str, ...], ...]:
     return tuple(groups)
 
 
-def _remove_action(owner: str, task: str, source: str, requests: list[CompletedRequest], proposals: list[TentativeProposal]) -> bool:
+def _remove_action(owner: str, task: str, source: str, requests: list[CompletedRequest], proposals: list[TentativeProposal], future_evidence=()) -> bool:
     owner, task = _plain_cell(owner), _plain_cell(task)
     owners = _owner_groups(owner)
     for request in requests:
@@ -206,6 +206,22 @@ def _remove_action(owner: str, task: str, source: str, requests: list[CompletedR
                 return True
     for proposal in proposals:
         if _same_task(proposal.topic, task):
+            # Raising a proposal for discussion is not implementing its outcome.
+            # Only source-bound, gap-safe quotations may establish that narrower task.
+            def raises_only(identity):
+                if not re.match(r"(?:raise|bring)\b", task, re.IGNORECASE) or not re.search(r"\bmeeting\b", task, re.IGNORECASE):
+                    return False
+                for record in future_evidence:
+                    quoted = record.splitlines()
+                    own = re.match(r"^\[([^\]]+)\]\s*(.*)$", quoted[-1]) if quoted else None
+                    if (own and own[1].casefold() == identity.casefold()
+                            and re.search(r"\b(?:i['’]ll|i will) bring (?:that|this|it) up (?:at|in)\b", own[2], re.IGNORECASE)
+                            and all(line in source.splitlines() for line in quoted)
+                            and _same_task(proposal.topic, record)):
+                        return True
+                return False
+            if all(any(raises_only(identity) for identity in group) for group in owners):
+                continue
             if not all(
                 any(_proposal_supported(source, proposal, identity, group) for identity in group)
                 if group else len(owners) == 1 and _proposal_supported(source, proposal, None)
@@ -234,7 +250,44 @@ def _table_separator(cells: list[str] | None) -> bool:
     return bool(cells and all(re.fullmatch(r":?-+:?", cell.replace(" ", "")) for cell in cells))
 
 
-def filter_completed_request_tasks(content: str, source: str, action_sections_only: bool = False) -> str:
+def action_entries(content: str) -> list[tuple[str, str]]:
+    """Read action bullets/tables for cross-document QA, without assigning owners."""
+    result, columns = [], None
+    active, depth, fence = False, 0, False
+    for line in content.splitlines():
+        if re.match(r"^\s*(?:```|~~~)", line):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if heading:
+            if "action items" in heading[2].casefold():
+                active, depth = True, len(heading[1])
+            elif len(heading[1]) <= depth:
+                active = False
+            columns = None
+            continue
+        if not active:
+            continue
+        cells = _table_cells(line)
+        if cells and not _table_separator(cells):
+            names = [_plain_cell(cell).casefold() for cell in cells]
+            owner = next((i for i, name in enumerate(names) if name in _OWNER_COLUMNS), None)
+            task = next((i for i, name in enumerate(names) if name in _TASK_COLUMNS), None)
+            if owner is not None and task is not None:
+                columns = (owner, task)
+            elif columns and len(cells) > max(columns):
+                result.append((_plain_cell(cells[columns[0]]), _plain_cell(cells[columns[1]])))
+        elif re.match(r"^\s*(?:[-+*]|\d+\.)\s+", line):
+            body = re.sub(r"^\s*(?:[-+*]|\d+\.)\s+", "", _plain_cell(line))
+            split = re.split(r"\s+[–—-]\s+|[:;]\s*", body, maxsplit=1)
+            if len(split) == 2:
+                result.append(tuple(split))
+    return result
+
+
+def filter_completed_request_tasks(content: str, source: str, action_sections_only: bool = False, *, future_evidence=()) -> str:
     requests, proposals = completed_requests(source), tentative_proposals(source)
     if not requests and not proposals:
         return content
@@ -297,7 +350,7 @@ def filter_completed_request_tasks(content: str, source: str, action_sections_on
             end = index + 2
             while end < len(original) and (cells := _table_cells(original[end])) is not None:
                 if owner_column is not None and task_column is not None and len(cells) == len(header):
-                    if _remove_action(cells[owner_column], cells[task_column], source, requests, proposals):
+                    if _remove_action(cells[owner_column], cells[task_column], source, requests, proposals, future_evidence):
                         removed += 1
                         end += 1
                         continue
@@ -320,7 +373,7 @@ def filter_completed_request_tasks(content: str, source: str, action_sections_on
             body = re.sub(r"^Owner:\s*", "", body, flags=re.IGNORECASE)
             candidate = re.split(r"\s+[–—-]\s+|[:;]\s*", body, maxsplit=1)
             owner, task = candidate[0], candidate[-1]
-            if _remove_action(owner, task, source, requests, proposals):
+            if _remove_action(owner, task, source, requests, proposals, future_evidence):
                 removed_any = True
                 index += 1
                 continue
