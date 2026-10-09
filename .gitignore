@@ -66,3 +66,7 @@ whole-run.json
 
 # Explicit opt-in private model response; never publish or commit
 whole-model-response.json
+
+# Private opt-in map/reduce chunk experiments
+chunk-plan.json
+chunk-comparison.json

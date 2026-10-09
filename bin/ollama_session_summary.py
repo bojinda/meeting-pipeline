@@ -36,12 +36,16 @@ def call_ollama(
     temperature: float = 0.2,
     num_ctx: int | None = None,
     usage_callback=None,
+    num_predict: int | None = None,
 ) -> str:
     options = {
         "temperature": temperature,
     }
     if num_ctx is not None:
         options["num_ctx"] = num_ctx
+
+    if num_predict is not None:
+        options["num_predict"] = num_predict
 
     payload: dict[str, Any] = {
         "model": model,
@@ -69,6 +73,11 @@ def call_ollama(
         usage_callback({"model": model, "num_ctx": num_ctx, "prompt_eval_count": data.get("prompt_eval_count") if type(data.get("prompt_eval_count")) is int else None,
                         "eval_count": data.get("eval_count") if type(data.get("eval_count")) is int else None,
                         "runtime_seconds": round(time.monotonic() - began, 3)})
+    if num_predict is not None and (
+        data.get("done_reason") in {"length", "max_tokens"}
+        or type(data.get("eval_count")) is int and data["eval_count"] >= num_predict
+    ):
+        raise ValueError("experimental_map_generation_limit")
     return (data.get("response") or "").strip()
 
 
@@ -255,6 +264,10 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--speaker-review-tokenizer", type=Path, help="Matching local tokenizer.json for speaker input budgeting")
     parser.add_argument("--speaker-review-window", type=int, help="Discovery window to review when the complete meeting exceeds budget")
 
+    parser.add_argument("--chunk-plan", type=Path, help="Private validated chunking experiment plan; requires a new --chunk-comparison-dir")
+    parser.add_argument("--chunk-comparison-dir", type=Path, help="New isolated map/reduce comparison destination")
+    parser.add_argument("--chunk-tokenizer", type=Path, help="Matching local tokenizer used to validate the private chunk plan")
+
     parser.add_argument("--synthesis-mode", choices=("map-reduce", "whole"), default="map-reduce", help="Meeting only: opt-in whole-meeting experiment; map/reduce remains default")
     parser.add_argument("--synthesis-num-ctx", type=int, help="Independent whole-meeting context (default 98304 or MEETING_SYNTHESIS_NUM_CTX)")
     parser.add_argument("--synthesis-model", help="Whole-meeting model override (default MEETING_SYNTHESIS_MODEL or selected reduce model)")
@@ -292,6 +305,16 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         resolve_model_defaults(args)
     except ValueError as exc:
         parser.error(str(exc))
+
+    if args.chunk_plan or args.chunk_comparison_dir or args.chunk_tokenizer:
+        if args.profile != "meeting" or args.synthesis_mode != "map-reduce" or not args.chunk_plan or not args.chunk_comparison_dir:
+            parser.error("Chunk experiments require meeting map/reduce, --chunk-plan and --chunk-comparison-dir")
+        source = args.transcript_dir.resolve()
+        target = args.chunk_comparison_dir.resolve()
+        production = Path(os.environ.get("MEETING_SUMMARIES_ROOT", str(Path(__file__).resolve().parents[1] / "meeting-summaries"))).resolve()
+        if target.exists() or target.is_relative_to(source) or source.is_relative_to(target) or target.is_relative_to(production) or production.is_relative_to(target):
+            parser.error("Chunk comparison destination must be new and outside source/production outputs")
+        _summary_dir = target
 
     if args.synthesis_mode == "whole":
         from meeting_postprocess.whole_synthesis import run_experiment, run_preflight, run_offline_validation
@@ -349,13 +372,21 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     ).expanduser().resolve()
 
     summaries_dir = _summary_dir or resolve_summary_dir(transcript_dir, summary_root)
-    summaries_dir.mkdir(parents=True, exist_ok=True)
+    summaries_dir.mkdir(parents=True, exist_ok=True, **({"mode": 0o700} if args.chunk_plan else {}))
 
     aliases: dict[str, str] = {}
     redaction_warnings = []
+    commitment_context_blocked = set()
     if profile == "meeting":
         try:
             redacted = redact_chunks(chunks)
+            # Suppress pronoun recovery in any source chunk touched by redaction.
+            # Only boundary metadata is used; private excluded text is never read.
+            source_ids = [str(chunk.get("chunk_id", index + 1)) for index, chunk in enumerate(chunks)]
+            for redaction in redacted.redactions:
+                start = source_ids.index(str(redaction["start_chunk_id"]))
+                end = source_ids.index(str(redaction["end_chunk_id"]))
+                commitment_context_blocked.update(source_ids[start:end + 1])
             write_private_redactions(summaries_dir, redacted.redactions)
             redaction_warnings = redacted.warnings
             if redacted.redactions:
@@ -443,17 +474,53 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         print(f"[info] speaker_alias_count={len(aliases)}", flush=True)
         print(f"[info] keep_recap={args.keep_recap}", flush=True)
 
+    map_chunks = chunks
+    chunk_plan = None
+    if args.chunk_plan:
+        try:
+            from meeting_postprocess import chunking
+            from meeting_chunk_experiment import source_bindings, file_hash
+            _, plan_path = approved_input("chunk_plan", args.chunk_plan)
+            _, tokenizer_path = approved_input("chunk_tokenizer", args.chunk_tokenizer or (Path(os.environ["MEETING_CHUNK_TOKENIZER"]) if os.environ.get("MEETING_CHUNK_TOKENIZER") else None))
+            chunk_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            count = chunking.counter(tokenizer_path or "")
+            if chunk_plan["settings"]["tokenizer_hash"] != file_hash(tokenizer_path):
+                raise chunking.ChunkingFailure("tokenizer_changed")
+            bindings = source_bindings(transcript_dir, alias_path if alias_bound else (alias_path or transcript_dir / "speaker_aliases.json"), correction_path)
+            map_chunks = chunking.apply_plan(chunk_plan, chunks, bindings, count,
+                lambda row: build_chunk_prompt(prompt_dir, row), chunk_system,
+                args.map_model, args.map_num_ctx, commitment_context_blocked)
+            write_private_json(summaries_dir / chunking.PLAN_FILE, chunk_plan)
+            comparison = {"source_hash": chunk_plan["source_hash"], "plan_hash": chunk_plan["plan_hash"],
+                          "coverage": chunk_plan["coverage"], "mode": chunk_plan["settings"]["mode"],
+                          "planner": chunk_plan["planner"], "budgets": chunk_plan["budgets"],
+                          "status": "processing", "usage": []}
+            comparison_started = time.monotonic()
+            original_callback = _usage_callback
+            def record_chunk_usage(item):
+                comparison["usage"].append(item)
+                write_private_json(summaries_dir / "chunk-comparison.json", comparison)
+                if original_callback is not None:
+                    original_callback(item)
+            _usage_callback = record_chunk_usage
+            write_private_json(summaries_dir / "chunk-comparison.json", comparison)
+        except Exception:
+            print("ERROR: Chunk plan/source/configuration validation failed; no model calls made", file=sys.stderr)
+            return 2
+
     chunk_summaries: list[dict[str, Any]] = []
     current_source = "\n".join(
         chunk["text"] for chunk in chunks
         if chunk.get("meeting_section") in {BUSINESS, ADJOURNMENT}
     ) if profile == "meeting" else ""
 
-    for idx, chunk in enumerate(chunks, start=1):
+    for idx, chunk in enumerate(map_chunks, start=1):
         chunk_id = chunk.get("chunk_id", f"chunk-{idx:03d}")
-        print(f"[map] {idx}/{len(chunks)} summarizing {chunk_id}", flush=True)
+        print(f"[map] {idx}/{len(map_chunks)} summarizing {chunk_id}", flush=True)
 
         prompt = build_chunk_prompt(prompt_dir, chunk)
+        if chunk_plan:
+            prompt += chunking.DETAILS
 
         try:
             summary_text = call_ollama(
@@ -464,6 +531,7 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
                 keep_alive=args.keep_alive,
                 temperature=args.temperature,
                 num_ctx=args.map_num_ctx,
+                **({"num_predict": chunk_plan["settings"]["map_output"]} if chunk_plan else {}),
                 **({"usage_callback": _usage_callback} if _usage_callback is not None else {}),
             )
         except Exception as exc:
@@ -488,6 +556,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         if profile == "meeting":
             for key in ("source_chunk_id", "meeting_section", "section_evidence"):
                 row[key] = chunk[key]
+        if chunk_plan:
+            row["source_portions"] = chunk["source_portions"]
         chunk_summaries.append(row)
 
     with chunk_summaries_path.open("w", encoding="utf-8") as f:
@@ -501,7 +571,7 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     recap_combined = ""
     commitments = []
     if profile == "meeting":
-        commitments = commitment_evidence(chunks)
+        commitments = commitment_evidence(chunks, include_context=True, blocked_context_source_ids=commitment_context_blocked)
         combined = build_reduce_input([
             row for row in chunk_summaries if row["meeting_section"] in {RECAP, BUSINESS, ADJOURNMENT}
         ]) or "No historical recap, current meeting business or adjournment was identified."
@@ -575,7 +645,7 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
                 content = filter_completed_request_tasks(
                     content, current_source, action_sections_only=output_filename == "minutes-draft.md",
                 )
-            content = strip_chunk_references(content, [chunk["file_name"] for chunk in chunks if chunk.get("file_name")])
+            content = strip_chunk_references(content, [chunk["file_name"] for chunk in (chunks + map_chunks if chunk_plan else chunks) if chunk.get("file_name")])
             content = strip_private_references(content)
         out_path = summaries_dir / output_filename
         out_path.write_text(content.rstrip() + "\n", encoding="utf-8")
@@ -586,6 +656,9 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             write_report(summaries_dir, findings)
             print(f"[qa] {len(findings)} finding(s); see {summaries_dir / 'minutes-qa.md'}", flush=True)
 
+    if chunk_plan:
+        comparison.update(status="complete", runtime_seconds=round(time.monotonic() - comparison_started, 3))
+        write_private_json(summaries_dir / "chunk-comparison.json", comparison)
     print("[done] summary generation complete", flush=True)
     return 0
 

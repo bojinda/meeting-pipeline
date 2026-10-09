@@ -1355,3 +1355,107 @@ Use:
 ## License
 
 AGPLv3
+
+
+## Optional adaptive meeting-chunk experiment
+
+Map/reduce remains the production default. These private comparisons reuse an
+existing transcript index; they do not run WhisperX, change models or apply
+unapproved identities. Approved turn corrections and aliases, redaction and
+section classification run before planning. Pre-meeting portions are excluded
+from experimental map inputs; historical recap stays separate from current
+business and adjournment.
+
+`bin/plan-meeting-chunks.sh` groups adjacent classified source portions without
+rewriting text. Medium mode has a 6,000-word ceiling (configurable, for example
+5,500); adaptive mode has an initial 10,000-word ceiling. These are ceilings,
+not fill targets. Deterministic grouping extends a continuing single-speaker
+report or a clearly connected question/answer/clarification. It stops at a new
+report/topic, section boundary or source chunk affected by redaction. Ambiguous
+continuity stays separate. The optional planner can recognize wider relationships.
+Exceptionally long reports may be split only at existing source-portion boundaries.
+If even one indivisible portion exceeds the budget, planning fails explicitly;
+no words are omitted. The normal baseline workflow remains available unchanged.
+
+Use a matching **local** tokenizer for the selected models (`--tokenizer`, or
+`MEETING_CHUNK_TOKENIZER`). Saved tokenizer truncation/padding is disabled for
+counting. Without one, counts use a conservative UTF-8 byte upper bound, labelled
+as such rather than reported as actual model tokens. Full map prompts, system
+instructions, a configurable generation reserve (default 4,096 tokens), and 1,024
+framing tokens must fit the explicitly configured map context. Token safety
+always overrides word ceilings. An experimental map response that exhausts its
+output reserve fails instead of being accepted as a complete summary. Context must be known from configuration or
+`--map-num-ctx`; this experiment never selects a model or context automatically.
+
+Example offline preparation, with a new private destination for each plan:
+
+```bash
+session="/private/completed-session"
+tokenizer="/private/matching-Qwen/tokenizer.json"
+comparison_root="$(mktemp -d "$PWD/ignore/chunk-comparison.XXXXXX")"
+
+# Zero inference calls and no files written. Inspect token method and budgets.
+bash bin/plan-meeting-chunks.sh "$session" --mode medium \
+  --max-words 5500 --map-num-ctx 32768 --tokenizer "$tokenizer" --preflight
+
+# Write a private, source-bound deterministic plan only; no public documents.
+bash bin/plan-meeting-chunks.sh "$session" --mode medium \
+  --max-words 5500 --map-num-ctx 32768 --tokenizer "$tokenizer" \
+  --output-dir "$comparison_root/medium-plan"
+```
+
+Repeat with `--mode adaptive` to compare the 10,000-word ceiling. Do not increase
+context merely to meet a word target. The selected map/reduce models remain the
+existing configured models; optional CLI model/context overrides retain their
+usual precedence. For a future boundary-planner trial, first run:
+
+```bash
+bash bin/plan-meeting-chunks.sh "$session" --mode adaptive \
+  --map-num-ctx 32768 --tokenizer "$tokenizer" --planner --preflight
+```
+
+The planner preflight measures the **entire eligible source**, instructions,
+JSON schema, framing and its complete output allowance. Planner context defaults
+to 98,304 independently of map/reduce; `--planner-num-ctx` may lower it, never
+exceed it. There is no 192K or dual-GPU switch. Only after reviewing the preflight,
+add `--planner --output-dir "$comparison_root/topic-plan"` to a planning command.
+That explicit request uses one boundary-only JSON inference under the existing
+GPU1 runner. It returns ordered inclusive source-end IDs, not summaries or
+extraction records. Invalid, incomplete, missing, repeated, out-of-order,
+section-crossing, redaction-crossing or over-budget boundaries fall back to
+validated deterministic larger groups with a recorded reason. There are no
+retries or partial JSON acceptance.
+
+After review, run an isolated comparison through the existing historical runner:
+
+```bash
+bash bin/summarize-existing-meeting.sh "$session" --keep-recap \
+  --map-num-ctx 32768 --chunk-tokenizer "$tokenizer" \
+  --chunk-plan "$comparison_root/medium-plan/chunk-plan.json" \
+  --chunk-comparison-dir "$comparison_root/medium-output"
+```
+
+The comparison destination must be new and outside transcript/production output
+directories. Plan and source hashes, approved identity inputs, prompt settings
+and the tokenizer binding are validated again before map inference; the runner
+captures the private plan in its comparison identity. A changed source or plan
+cannot reuse incompatible completed results. Map output retains the existing
+six-section structure, with narrow guidance to preserve questions/answers,
+actor/object roles, commitments, motions, numbers and later qualifications.
+Reduce, action guards, motion cleanup and QA continue to use the original
+classified source. There is no additional extraction layer.
+
+`chunk-plan.json` and `chunk-comparison.json` are private, gitignored, securely
+written artifacts excluded from public exports and links. They record full
+source-portion coverage, budgets, fallback reasons, hashes, runtime and actual
+model token usage where Ollama supplies it. Grouped chunk summaries also retain
+exact private source-portion provenance and containing timestamps. Coverage
+means every eligible source portion occurs exactly once in chronological order;
+it does not certify that an LLM retained every substantive detail.
+
+For historical review, compare baseline/medium/adaptive outputs against source
+for recap separation, committee-minutes sharing commitments and recipients,
+efficiency-testing actor/object roles, Mac Yard restructuring chronology and
+later numerical qualifications, convention motion roles/outcomes, and action
+completeness/ownership/qualification. Compare `minutes-qa` findings as well.
+No live comparison is necessary to run the synthetic offline tests.

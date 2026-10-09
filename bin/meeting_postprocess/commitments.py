@@ -48,30 +48,78 @@ _THIRD_PARTY_STEP = re.compile(
 )
 
 
-def commitment_evidence(chunks: list[dict]) -> list[str]:
+_CONTEXT_PROMISE = re.compile(r"^do (?:that|it)(?:[.!?]|$|\s+(?:after|before|when|once|tomorrow|later|next)\b)", re.IGNORECASE)
+_SHARING_CONTEXT = re.compile(
+    r"\b(?:i|we)\s+(?:(?:can|will|should|need to|want to)\s+)?"
+    r"(?:share|send|circulate)\s+[^.!?;]*?"
+    r"\b(?:minutes|reports?|notes|documents?|information|files?|lists?|packages?)\b"
+    r"[^.!?;]*?\b(?:to|with)\s+"
+    r"(?!(?:(?:all|both|some|any) (?:of )?)?(?:you|them|him|her|it|that|this|us)\b)[a-z][^.!?;]*",
+    re.IGNORECASE,
+)
+_CONTEXT_HYPOTHETICAL = re.compile(r"\b(?:if (?:i|we|you|they) (?:had|could|were)|would|could)\b", re.IGNORECASE)
+
+
+def _sharing_context(text: str) -> bool:
+    # Resolve only an adjacent, concrete sharing task with an explicit recipient.
+    # Never turn a bare pronoun or a quoted/example conversation into a task.
+    return bool(
+        len(list(_SHARING_CONTEXT.finditer(text))) == 1
+        and len(re.findall(r"\b(?:share|send|circulate)\b", text, re.IGNORECASE)) == 1
+        and not (_UNSUPPORTED.search(text) or _QUOTED_FRAME.search(text)
+                 or _CONTEXT_HYPOTHETICAL.search(text) or _THIRD_PARTY_STEP.search(text))
+        and not any(quote in text for quote in ('"', '“', '”'))
+    )
+
+
+def commitment_evidence(chunks: list[dict], *, include_context: bool = False,
+                        blocked_context_source_ids: set[str] | None = None) -> list[str]:
     """Retain speaker and their qualified wording; do not generate action rows.
 
     Only already-redacted, classified current sections may contribute. A narrow
     task-verb check excludes conversational promises and capability statements.
     The bounded, deduplicated evidence is supplemental, never an assignment.
     """
+    # Contextual recovery is enabled only by the meeting map/reduce caller;
+    # existing single-record evidence validation retains its strict contract.
     evidence = []
+    blocked = blocked_context_source_ids or set()
     for chunk in chunks:
         if chunk.get("meeting_section") not in {BUSINESS, ADJOURNMENT}:
             continue
+        previous = None
+        context_safe = include_context and not (
+            str(chunk.get("source_chunk_id", chunk.get("chunk_id", ""))) in blocked
+            or chunk.get("speaker_review_gap") or chunk.get("redaction_gap")
+        )
         for line in chunk.get("text", "").splitlines():
             turn = re.match(r"^\[([^\]\n]+)\]\s*(.*)", line)
             if not turn:
+                previous = None
                 continue
             speaker, text = turn.groups()
+            prior = previous
+            previous = (speaker, text)
             commitment = _COMMITMENT.fullmatch(text)
-            if not commitment or not _TASK.search(commitment["task"]) or _UNSUPPORTED.search(text):
+            if not commitment or _UNSUPPORTED.search(text):
                 continue
+            context = None
+            if not _TASK.search(commitment["task"]):
+                if not context_safe or not _CONTEXT_PROMISE.search(commitment["task"]):
+                    continue
+                futures = list(re.finditer(_FUTURE, text[:commitment.start("task")], re.IGNORECASE))
+                prefix = text[:futures[-1].start()] if futures else ""
+                if _sharing_context(prefix):
+                    context = ""  # The task and undertaking are already in this exact source line.
+                elif re.fullmatch(r"(?:(?:okay|ok|yeah|so|well|uh|um|oh|and|then)[,.]?\s*)*", prefix.strip(), re.IGNORECASE) and prior and prior[0] == speaker and _sharing_context(prior[1]):
+                    context = prior[1]
+                else:
+                    continue
             # A conditional undertaking may be genuine. Reject speech/example
             # framing before the selected promise, not every conditional clause.
             if _QUOTED_FRAME.search(text[:commitment.start("task")]):
                 continue
-            if len(text) > 1000:
+            if len(text) + len(context or "") > 1000:
                 continue  # Do not truncate a qualification in a long ASR turn.
             # Quote only the owner's undertaking when a later delivery clause
             # changes actor. Its recipient/transformation is not this task's.
@@ -80,6 +128,8 @@ def commitment_evidence(chunks: list[dict]) -> list[str]:
                     text = text[:step.start()].rstrip(" ,;")
                     break
             record = f"[{speaker}] {text}"
+            if context:
+                record = f"[{speaker}] {context}\n" + record
             if record not in evidence:
                 evidence.append(record)
                 if len(evidence) == 32:

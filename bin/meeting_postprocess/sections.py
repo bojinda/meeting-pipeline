@@ -84,6 +84,13 @@ _HISTORICAL_REPORT = re.compile(
     "|".join(month_name[1:]) + r")\b",
     re.IGNORECASE,
 )
+# Present-time vocabulary inside a past-tense recap state is not itself a
+# transition to this meeting. Strong recent-time cues still allow interruptions.
+_HISTORICAL_CURRENT_STATE = re.compile(
+    _LEAD_IN + r"(?:and\s+)?(?:then\s+)?"
+    r"(?:i|we|they|he|she|[A-Z][\w'’.-]*(?:\s+[A-Z][\w'’.-]*){0,2})\s+"
+    r"(?:was|were)\s+currently\b", re.IGNORECASE,
+)
 _CURRENT_DISCUSSION = re.compile(
     r"\b(?:currently|right now|today|yesterday|recently|last night|this (?:morning|afternoon|evening|week)|"
     r"(?:i|we|they)(?:['’]ve| have)? just (?:had|saw|discussed|noticed|been))\b",
@@ -175,13 +182,15 @@ class SectionClassifier:
             self.business_started = True
             self.recap_pending = True
             return self.section, "Previous-meeting recap requested; awaiting historical content"
-        if _CURRENT_DISCUSSION.search(text):
+        current_cues = list(_CURRENT_DISCUSSION.finditer(text))
+        historical_state = self.section == RECAP and _HISTORICAL_CURRENT_STATE.search(text)
+        if current_cues and not (historical_state and all(cue[0].casefold() == "currently" for cue in current_cues)):
             self.section = BUSINESS
             self.business_started = True
             self.opening_recap_window = False
             self.recap_pending = False
             return BUSINESS, "Explicit current/recent discussion interrupts any recap"
-        if self.recap_pending and _HISTORICAL_REPORT.search(text):
+        if self.recap_pending and (_HISTORICAL_REPORT.search(text) or historical_state):
             self.section = RECAP
             self.recap_pending = False
             return RECAP, "Historical report follows the requested recap"

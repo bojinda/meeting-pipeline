@@ -141,6 +141,60 @@ class CommitmentEvidenceTests(unittest.TestCase):
             with self.subTest(aliases=aliases):
                 self.assertEqual(commitment_evidence(prepare_chunks(raw, aliases)), [f"[{speaker}] I'll try to isolate the references."])
 
+    def test_inline_contextual_undertaking_preserves_task_recipient_and_wording(self):
+        source = ("[Taylor] That if we can share the minutes from the committee at the policy level "
+                  "to all the health and safety committees, so I'm going to do that after this meeting.")
+        self.assertEqual(commitment_evidence([section(source)], include_context=True), [source])
+        # Shared single-record/whole-evidence validation remains conservative.
+        self.assertEqual(commitment_evidence([section(source)]), [])
+
+    def test_adjacent_same_speaker_context_supports_explicit_undertaking(self):
+        for speaker in ("Taylor", "SPEAKER_03"):
+            for promise in ("I'm going to do that after this meeting.", "So, I will try to do it tomorrow."):
+                with self.subTest(speaker=speaker, promise=promise):
+                    source = f"[{speaker}] We can share the committee minutes with the health and safety committees.\n[{speaker}] " + promise
+                    self.assertEqual(commitment_evidence([section(source)], include_context=True), [source])
+
+    def test_contextual_undertaking_requires_a_concrete_task_and_recipient(self):
+        for context in ("We can share it with them.", "We can share the minutes with them.",
+                        "We can share the minutes with all of them.", "We can share the minutes.",
+                        "We can discuss the health and safety committees.",
+                        "We can share the minutes with Taylor and send the report to Morgan."):
+            with self.subTest(context=context):
+                source = "[Taylor] " + context + "\n[Taylor] I'm going to do that after this meeting."
+                self.assertEqual(commitment_evidence([section(source)], include_context=True), [])
+        self.assertEqual(commitment_evidence([section("[Taylor] I'm going to do that after this meeting.")], include_context=True), [])
+
+    def test_contextual_undertaking_does_not_borrow_another_speakers_task(self):
+        context = "[Taylor] We can share the committee minutes with the health and safety committees."
+        for turns in ("\n[Morgan] I'm going to do that after this meeting.",
+                      "\n[Morgan] Agreed.\n[Taylor] I'm going to do that after this meeting.",
+                      "\n[Taylor] The room is warm.\n[Taylor] I'm going to do that after this meeting.",
+                      "\nUnlabelled interruption.\n[Taylor] I'm going to do that after this meeting."):
+            with self.subTest(turns=turns):
+                self.assertEqual(commitment_evidence([section(context + turns)], include_context=True), [])
+
+    def test_contextual_undertaking_excludes_quoted_hypothetical_speech(self):
+        for context in ("For example, we can share the minutes with the committee.",
+                        "If we were asked, we can share the minutes with the committee.",
+                        'I say "we can share the minutes with the committee".',
+                        "Suppose we can share the minutes with the committee."):
+            for separator in (" So, ", "\n[Taylor] "):
+                with self.subTest(context=context, separator=separator):
+                    source = "[Taylor] " + context + separator + "I'm going to do that after this meeting."
+                    self.assertEqual(commitment_evidence([section(source)], include_context=True), [])
+
+    def test_contextual_undertaking_never_crosses_chunks_sections_or_redaction_gaps(self):
+        context = "[Taylor] We can share the minutes with the health and safety committees."
+        promise = "[Taylor] I'm going to do that after this meeting."
+        self.assertEqual(commitment_evidence([section(context), section(promise)], include_context=True), [])
+        for label in (PRE_MEETING, RECAP):
+            self.assertEqual(commitment_evidence([section(context + "\n" + promise, label)], include_context=True), [])
+        for gap in ("speaker_review_gap", "redaction_gap"):
+            self.assertEqual(commitment_evidence([dict(section(context + "\n" + promise), **{gap: True})], include_context=True), [])
+        source = dict(section(context + "\n" + promise), source_chunk_id="4")
+        self.assertEqual(commitment_evidence([source], include_context=True, blocked_context_source_ids={"4"}), [])
+
     def test_evidence_is_bounded_deduplicated_and_does_not_truncate_conditions(self):
         source = "[Taylor] I'll send the report."
         self.assertEqual(commitment_evidence([section(source), section(source)]), [source])

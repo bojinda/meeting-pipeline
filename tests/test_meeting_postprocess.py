@@ -219,6 +219,30 @@ class SectionTests(unittest.TestCase):
                 self.assertIn("Casual conversation", rows[0]["text"])
                 self.assertIn("budget is approved", rows[1]["text"])
 
+    def test_past_tense_currently_state_remains_historical_until_real_transition(self):
+        text = ("[Chair] I'll start with last month's recap.\n"
+                "[Taylor] For the previous month, we reviewed staffing.\n"
+                "[Taylor] And then they were currently hiring at the yard because of last month.\n"
+                "[Taylor] The committee minutes needed distribution.\n"
+                "[Chair] Okay, I guess we'll move on to this month.\n"
+                "[Morgan] I'll send the new staffing report.")
+        rows = prepare_chunks([chunk(text)], {})
+        self.assertEqual([row["meeting_section"] for row in rows], [RECAP, BUSINESS])
+        self.assertIn("were currently hiring", rows[0]["text"])
+        self.assertIn("minutes needed distribution", rows[0]["text"])
+        self.assertNotIn("were currently hiring", rows[1]["text"])
+        self.assertIn("new staffing report", rows[1]["text"])
+
+    def test_genuine_current_discussion_still_interrupts_an_active_recap(self):
+        for interruption in ("They are currently hiring at the yard.",
+                             "And then they were currently hiring, but today we have a new staffing concern.",
+                             "Yesterday we had a red flag on the service track.",
+                             "Right now the brake valve needs manual handling."):
+            with self.subTest(interruption=interruption):
+                text = "[Taylor] At the last meeting, we reviewed staffing.\n[Morgan] " + interruption
+                rows = prepare_chunks([chunk(text)], {})
+                self.assertEqual([row["meeting_section"] for row in rows], [RECAP, BUSINESS])
+
     def test_explicit_current_transition_ends_recap(self):
         rows = prepare_chunks([chunk("[SPEAKER_00] At the last meeting, the budget was approved.\n[SPEAKER_01] Moving on to new business. We need to reconsider the budget.\n[SPEAKER_00] The deadline is Friday.")], {})
         self.assertEqual([r["meeting_section"] for r in rows], [RECAP, BUSINESS])
@@ -732,6 +756,69 @@ class PipelineTests(unittest.TestCase):
                 for filename in ("summary.md", "minutes-draft.md", "action-items.md"):
                     self.assertNotIn("PRIVATE_CHATTER_SENTINEL", (output / filename).read_text(encoding="utf-8"))
                 self.assertEqual([row["meeting_section"] for row in engine.load_jsonl(output / "meeting_sections.jsonl")], [PRE_MEETING, RECAP, BUSINESS, RECAP, BUSINESS, ADJOURNMENT])
+
+    def test_historical_currently_report_stays_out_of_current_reduce_inputs(self):
+        source = ("[Chair] I'll start with last month's recap.\n"
+                  "[Taylor] For the previous month, we reviewed staffing.\n"
+                  "[Taylor] And then they were currently hiring at the HISTORICAL_YARD_SENTINEL.\n"
+                  "[Taylor] The HISTORICAL_REPORT_SENTINEL was distributed.\n"
+                  "[Chair] Okay, I guess we'll move on to this month.\n"
+                  "[Morgan] CURRENT_STAFFING_SENTINEL needs discussion.")
+        for keep_recap in (False, True):
+            with self.subTest(keep_recap=keep_recap), tempfile.TemporaryDirectory() as directory:
+                status, calls, output = self.run_pipeline(Path(directory), source, ["--keep-recap"] if keep_recap else [], reduce_echo=True)
+                self.assertEqual(status, 0)
+                for instruction in ("write an action-items document", "write formal draft minutes"):
+                    prompt = next(call["prompt"] for call in calls if instruction in call["prompt"])
+                    self.assertIn("CURRENT_STAFFING_SENTINEL", prompt)
+                    self.assertNotIn("HISTORICAL_YARD_SENTINEL", prompt)
+                    self.assertNotIn("HISTORICAL_REPORT_SENTINEL", prompt)
+                summary = next(call["prompt"] for call in calls if "write a concise executive summary" in call["prompt"])
+                self.assertIn("HISTORICAL_YARD_SENTINEL", summary)
+                self.assertIn("previous_meeting_recap", summary)
+                self.assertIn("historical context", summary)
+                self.assertNotIn("HISTORICAL_YARD_SENTINEL", (output / "action-items.md").read_text(encoding="utf-8"))
+                self.assertEqual("HISTORICAL_YARD_SENTINEL" in (output / "minutes-draft.md").read_text(encoding="utf-8"), keep_recap)
+
+    def test_local_sharing_context_omitted_by_map_reaches_action_reduce_with_recipient(self):
+        for joined in (False, True):
+            for aliases, speaker in ((None, "SPEAKER_03"), ({"SPEAKER_03": "Taylor"}, "Taylor")):
+                with self.subTest(joined=joined, aliases=aliases), tempfile.TemporaryDirectory() as directory:
+                    task = "We can share the committee minutes with the health and safety committees"
+                    promise = "I'm going to do that after this meeting."
+                    source = "[SPEAKER_03] " + task + (", so " if joined else ".\n[SPEAKER_03] ") + promise
+                    def response(call):
+                        if "Transcript chunk:\n" in call["prompt"]:
+                            return "## Topics\n- Committee discussion.\n## Action Items\nNone noted."
+                        if "write an action-items document" in call["prompt"] or "write formal draft minutes" in call["prompt"]:
+                            evidence = call["prompt"].split("Source-backed future commitment evidence (current meeting only):\n", 1)[1]
+                            self.assertIn(task, evidence)
+                            self.assertIn(promise, evidence)
+                            self.assertIn(f"[{speaker}]", evidence)
+                            return f"# Generated document\n## Action Items\n- {speaker} – Share the committee minutes with the health and safety committees after this meeting."
+                        return "# Summary\nCommittee discussion."
+                    status, calls, output = self.run_pipeline(Path(directory), source, aliases=aliases, model_reply=response)
+                    self.assertEqual(status, 0)
+                    self.assertEqual(len(calls), sum("Transcript chunk:\n" in call["prompt"] for call in calls) + 3)
+                    for filename in ("action-items.md", "minutes-draft.md"):
+                        self.assertIn("health and safety committees after this meeting", (output / filename).read_text(encoding="utf-8"))
+                    self.assertNotIn("health and safety committees", (output / "chunk_summaries.jsonl").read_text(encoding="utf-8"))
+
+    def test_contextual_undertaking_is_not_recovered_across_redacted_source(self):
+        for source in (
+            "[Taylor] We can share the minutes with the committee.\n[Taylor] Redact the following. SECRET_CONTEXT_SENTINEL. End redaction.\n[Taylor] I'm going to do that after this meeting.",
+            "[Taylor] We can share the minutes with the committee, redact the following. SECRET_CONTEXT_SENTINEL. End redaction. so I'm going to do that after this meeting.",
+        ):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as directory:
+                def response(call):
+                    self.assertNotIn("SECRET_CONTEXT_SENTINEL", call["prompt"])
+                    if "Transcript chunk:\n" in call["prompt"]:
+                        return "## Topics\n- Committee discussion."
+                    self.assertNotIn("Source-backed future commitment evidence", call["prompt"])
+                    return "# Generated document\nNone noted."
+                status, calls, output = self.run_pipeline(Path(directory), source, model_reply=response)
+                self.assertEqual(status, 0)
+                self.assertTrue(calls)
 
     def test_current_commitments_omitted_by_map_are_available_to_action_reductions(self):
         source = ("[SPEAKER_03] I'll contact the PRE_SENTINEL coordinator.\n"
