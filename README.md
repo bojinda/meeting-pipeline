@@ -1420,8 +1420,13 @@ to 98,304 independently of map/reduce; `--planner-num-ctx` may lower it, never
 exceed it. There is no 192K or dual-GPU switch. Only after reviewing the preflight,
 add `--planner --output-dir "$comparison_root/topic-plan"` to a planning command.
 That explicit request uses one boundary-only JSON inference under the existing
-GPU1 runner. It returns ordered inclusive source-end IDs, not summaries or
-extraction records. Invalid, incomplete, missing, repeated, out-of-order,
+GPU1 runner. It returns only adjacent boundaries to remove, for example
+`{"merge_after":["P2"]}` joins P2 with P3; `{"merge_after":[]}` leaves every
+portion separate.
+It reads full portions, including questions referring to earlier parts of the
+preceding report; a new subject by the same speaker does not justify a merge.
+Validated removals become the existing ordered endpoint plan. No summaries or
+extraction records are requested. Invalid, incomplete, fabricated, repeated, out-of-order,
 section-crossing, redaction-crossing or over-budget boundaries fall back to
 validated deterministic larger groups with a recorded reason. There are no
 retries or partial JSON acceptance.

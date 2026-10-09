@@ -42,8 +42,8 @@ def prompt(source):
     return engine.build_chunk_prompt(PROMPTS, source)
 
 
-def response(ends):
-    return {"done": True, "done_reason": "stop", "response": json.dumps({"ends": ends}),
+def response(merge_after):
+    return {"done": True, "done_reason": "stop", "response": json.dumps({"merge_after": merge_after}),
             "prompt_eval_count": 2000, "eval_count": 20}
 
 
@@ -91,7 +91,7 @@ class GroupingTests(unittest.TestCase):
         rows = [row(1, "[Taylor] PRIVATE_CHATTER_SENTINEL", PRE_MEETING), row(2, "[Taylor] The report.")]
         def call(text, *args):
             self.assertNotIn("PRIVATE_CHATTER_SENTINEL", text)
-            return response(["P1"])
+            return response([])
         plan = self.plan(rows, settings(planner=True), call=call)
         self.assertEqual(plan["coverage"], {"eligible_portions": 1, "covered_portions": 1, "complete": True})
         self.assertNotIn("PRIVATE_CHATTER_SENTINEL", self.apply(plan, rows)[0]["text"])
@@ -129,9 +129,9 @@ class GroupingTests(unittest.TestCase):
         calls = []
         def call(*args):
             calls.append(args)
-            self.assertEqual(set(args[2]["properties"]), {"ends"})
+            self.assertEqual(set(args[2]["properties"]), {"merge_after"})
             self.assertIn("untrusted data", args[1])
-            return response(["P2", "P3"])
+            return response(["P1"])
         plan = self.plan(rows, settings(planner=True), call=call)
         self.assertEqual(len(calls), 1)
         self.assertEqual(plan["planner"]["status"], "validated")
@@ -140,12 +140,16 @@ class GroupingTests(unittest.TestCase):
 
     def test_bad_boundaries_fall_back_without_discarding_any_portion(self):
         rows = [row(1, "[Taylor] First report."), row(2, "[Morgan] Second report."), row(3, "[Casey] Third report.")]
-        for ends in (["P1"], ["P3", "P1"], ["P1", "P1", "P3"], ["P99"], [], [1, "P3"]):
-            with self.subTest(ends=ends):
-                plan = self.plan(rows, settings(planner=True), call=lambda *args: response(ends))
+        for merges in (["P3"], ["P2", "P1"], ["P1", "P1"], ["P99"], [1], ["P01"], None):
+            with self.subTest(merges=merges):
+                plan = self.plan(rows, settings(planner=True), call=lambda *args: response(merges))
                 self.assertEqual(plan["planner"]["status"], "deterministic_fallback")
                 self.assertEqual(plan["groups"], [["P1"], ["P2"], ["P3"]])
                 self.assertTrue(plan["coverage"]["complete"])
+        # Converted/saved endpoint plans still enforce the original coverage rules.
+        for ends in (["P1"], ["P3", "P1"], ["P1", "P1", "P3"], ["P99"], [], [1, "P3"]):
+            with self.subTest(ends=ends), self.assertRaises(chunking.ChunkingFailure):
+                chunking.validate_ends(ends, rows, settings(), chunking.counter(), prompt, SYSTEM, set())
 
     def test_planner_keeps_lengthy_report_questions_and_corrections_together(self):
         rows = [row(1, "[Taylor] Equipment report. " + "inspection detail " * 900),
@@ -155,9 +159,9 @@ class GroupingTests(unittest.TestCase):
         calls = []
         def call(*args):
             calls.append(args)
-            self.assertIn('return {"ends":["P3","P4"]}', args[1])
+            self.assertIn('return {"merge_after":["P2"]}', args[1])
             self.assertIn("NOT inherently topic boundaries", args[1])
-            return response(["P3", "P4"])
+            return response(["P1", "P2"])
         plan = self.plan(rows, settings(planner=True, map_context=98304), call=call)
         self.assertEqual(len(calls), 1)
         self.assertEqual(plan["groups"], [["P1", "P2", "P3"], ["P4"]])
@@ -170,14 +174,77 @@ class GroupingTests(unittest.TestCase):
         rows = [row(1, "[Taylor] The equipment check is complete."),
                 row(2, "[Taylor] Next topic: convention arrangements. Can two delegates attend?"),
                 row(3, "[Morgan] Yes, two delegates can attend.")]
-        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P1", "P3"]))
+        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P2"]))
         self.assertEqual(plan["groups"], [["P1"], ["P2", "P3"]])
         self.assertEqual(plan["planner"]["boundary_comparison"]["segmentation_change"], "same_as_deterministic")
+
+    def test_merge_planner_keeps_new_report_after_recovery_discussion(self):
+        rows = [row(1, "[Taylor] The member is recovering on modified duties. I helped with the forms. Any questions? Have we discussed the convention yet?"),
+                row(2, "[Morgan] No, not yet.\n[Taylor] The convention was productive. Two delegates attended.")]
+        plan = self.plan(rows, settings(planner=True), call=lambda *args: response([]))
+        # An answer to a new-subject question does not extend the recovery report.
+        self.assertEqual(plan["groups"], [["P1"], ["P2"]])
+        self.assertEqual(plan["planner"]["merge_after"], [])
+
+    def test_merge_planner_joins_wildfire_safety_clarification_across_speakers(self):
+        rows = [row(1, "[Morgan] The wildfire moved toward the train. Crews were not warned and could not see the route. That was a safety concern."),
+                row(2, "[Casey] But were they waiting for an opposing train?\n[Morgan] Possibly, but the smoke blocked visibility.\n[Casey] The recording showed a train passing them.")]
+        calls = []
+        def call(text, *args):
+            calls.append(text)
+            self.assertIn("wildfire moved toward the train", text)
+            self.assertIn("waiting for an opposing train", text)
+            return response(["P1"])
+        plan = self.plan(rows, settings(planner=True), call=call)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(plan["ends"], ["P2"])
+        self.assertEqual(plan["groups"], [["P1", "P2"]])
+        self.assertEqual(self.apply(plan, rows)[0]["text"], "\n".join(r["text"] for r in rows))
+
+    def test_merge_planner_sees_question_referring_to_earlier_report_passage(self):
+        earlier = "Sixth-shift work still receives time and a half, including the stated exception."
+        unrelated_tail = "The proposed job changes are still under review."
+        rows = [row(1, "[Riley] " + earlier + "\n[Riley] Management meetings have not resolved the scheduling concerns.\n[Riley] " + unrelated_tail),
+                row(2, "[Taylor] Just so I heard you correctly, are sixth shifts no longer paid at time and a half?\n[Riley] No, sixth shifts are still paid. The other cross-agreement cases are disputed.")]
+        def call(text, system, *args):
+            supplied = json.loads(text)["portions"]
+            self.assertIn(earlier, supplied[0][3])
+            self.assertTrue(supplied[0][3].endswith(unrelated_tail))
+            self.assertIn("earlier part of the preceding officer report", system)
+            self.assertIn("Same speaker does NOT imply same subject", system)
+            return response(["P1"])
+        plan = self.plan(rows, settings(planner=True), call=call)
+        self.assertEqual(plan["groups"], [["P1", "P2"]])
+        self.assertTrue(plan["coverage"]["complete"])
+
+    def test_merge_chain_must_fit_as_a_whole_not_just_pairwise(self):
+        rows = [row(i, f"[{speaker}] " + "detail " * 20) for i, speaker in enumerate(("Taylor", "Morgan", "Riley"), 1)]
+        config = settings(planner=True, max_words=50)
+        self.assertEqual(chunking.merge_endpoints(["P1"], rows, config, chunking.counter(), prompt, SYSTEM, set()), ["P2", "P3"])
+        plan = self.plan(rows, config, call=lambda *args: response(["P1", "P2"]))
+        self.assertEqual(plan["planner"]["status"], "deterministic_fallback")
+        self.assertEqual(plan["planner"]["reason"], "group_over_budget")
+        self.assertEqual(plan["groups"], [["P1"], ["P2"], ["P3"]])
+        self.assertTrue(plan["coverage"]["complete"])
+
+    def test_merge_chain_keeps_endpoint_plan_hash_and_legacy_compatibility(self):
+        rows = [row(1, "[Taylor] Equipment report."), row(2, "[Taylor] More detail."),
+                row(3, "[Taylor] A correction."), row(4, "[Morgan] Next topic: staffing.")]
+        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P1", "P2"]))
+        self.assertEqual(plan["ends"], ["P3", "P4"])
+        self.assertEqual(plan["source_hash"], chunking.digest(rows))
+        self.assertEqual(plan["plan_hash"], chunking.digest({k: v for k, v in plan.items() if k != "plan_hash"}))
+        self.assertEqual(plan["planner"]["response_contract"], "adjacent_merges_v1")
+        legacy = copy.deepcopy(plan)
+        legacy["planner"].pop("response_contract")
+        legacy["planner"].pop("merge_after")
+        legacy["plan_hash"] = chunking.digest({k: v for k, v in legacy.items() if k != "plan_hash"})
+        self.assertEqual(self.apply(legacy, rows), self.apply(plan, rows))
 
     def test_singleton_planner_is_valid_without_demonstrating_grouping_improvement(self):
         rows = [row(1, "[Taylor] Equipment report begins."), row(2, "[Taylor] More equipment detail."),
                 row(3, "[Taylor] A correction to the equipment count.")]
-        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P1", "P2", "P3"]))
+        plan = self.plan(rows, settings(planner=True), call=lambda *args: response([]))
         self.assertEqual(plan["planner"]["status"], "validated")
         self.assertEqual(plan["groups"], [["P1"], ["P2"], ["P3"]])
         self.assertTrue(plan["coverage"]["complete"])
@@ -193,7 +260,7 @@ class GroupingTests(unittest.TestCase):
 
     def test_fewer_groups_do_not_certify_semantic_quality(self):
         rows = [row(1, "[Taylor] Equipment report."), row(2, "[Morgan] A separate convention report.")]
-        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P2"]))
+        plan = self.plan(rows, settings(planner=True), call=lambda *args: response(["P1"]))
         comparison = plan["planner"]["boundary_comparison"]
         self.assertTrue(comparison["structurally_valid"])
         self.assertEqual(comparison["deterministic_group_count"], 2)
@@ -207,7 +274,7 @@ class GroupingTests(unittest.TestCase):
             ([row(1, "[Taylor] Before."), row(2, "[Morgan] After.")], settings(planner=True), {"2"}),
             ([row(1, "[Taylor] " + "detail " * 30), row(2, "[Morgan] " + "detail " * 30)], settings(planner=True, max_words=50), set()),
         ):
-            plan = self.plan(rows, config, blocked, lambda *args: response(["P2"]))
+            plan = self.plan(rows, config, blocked, lambda *args: response(["P1"]))
             self.assertEqual(plan["planner"]["status"], "deterministic_fallback")
             self.assertEqual(plan["groups"], [["P1"], ["P2"]])
 
@@ -224,9 +291,11 @@ class GroupingTests(unittest.TestCase):
 
     def test_planner_failure_and_generation_limit_never_retry_or_accept_partial_json(self):
         rows = [row(1, "[Taylor] A report.")]
-        for failure in (TimeoutError(), response(["P1"]) | {"response": "{"},
-                        response(["P1"]) | {"done_reason": "length", "eval_count": 2048},
-                        response(["P1"]) | {"done": False}, response(["P1"]) | {"response": '{"ends":["P1"],"ends":["P1"]}'}, response(["P1"]) | {"response": '{"ends":["P1"],"summary":"unsupported"}'}):
+        for failure in (TimeoutError(), response([]) | {"response": "{"},
+                        response([]) | {"done_reason": "length", "eval_count": 2048},
+                        response([]) | {"done": False}, response([]) | {"response": '{"merge_after":[],"merge_after":[]}'},
+                        response([]) | {"response": '{"merge_after":[],"summary":"unsupported"}'},
+                        response([]) | {"response": '{"ends":["P1"]}'}):
             calls = []
             def call(*args):
                 calls.append(args)
@@ -405,7 +474,8 @@ class ComparisonTests(unittest.TestCase):
             self.assertEqual(payload["options"]["num_ctx"], 98304)
             self.assertFalse(payload["think"])
             source = json.loads(payload["prompt"])
-            return response([r[0] for r in source["portions"]])
+            self.assertTrue(source["portions"])
+            return response([])
         with patch.dict(os.environ, self.environment, clear=True), patch.object(command, "managed_generate", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(command.main([str(self.source), "--planner", "--output-dir", str(self.root / "plan")]), 0)
         self.assertEqual(len(calls), 1)
