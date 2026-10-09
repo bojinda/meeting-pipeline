@@ -387,53 +387,77 @@ WHISPERX_DEVICE=cuda
 WHISPERX_DEVICE_INDEX=0
 ```
 
-Both `postprocess-meeting.sh` and `postprocess-lesson.sh` acquire GPU 0 immediately
-before running WhisperX and release it when that command finishes. They perform
-CPU chunking without a GPU lock, then acquire GPU 1 immediately before invoking
-the corresponding summarizer and hold it for the whole map/reduce process,
-including optional recap generation. Both profiles use the exact same resource
-paths. A GPU 0 WhisperX job can run concurrently with a GPU 1 summarization job;
-two jobs targeting the same physical GPU serialize. WhisperX explicitly receives
-`--device_index "$WHISPERX_DEVICE_INDEX"`; keep its CUDA index consistent with
-the intended device placement and CUDA-visible device order.
+Both postprocess wrappers use the canonical runner's shared durable admission
+and the original physical GPU locks: GPU0 for foreground WhisperX, CPU chunking
+outside reservations, then GPU1 for the entire normal map/reduce and recap stage.
+GPU0 transcription and GPU1 summarization may overlap; same-resource jobs serialize.
+WhisperX keeps its existing device index. Device placement and backend cleanup
+still require approved live calibration before deployment.
 
-`bin/with-gpu-lock.sh` uses util-linux [flock](https://man7.org/linux/man-pages/man1/flock.1.html),
-with `setsid` from util-linux and GNU `env --default-signal` from coreutils for
-process/signal handling. If occupied, it logs the resource/path and waits up to
-`AIHUB_GPU_LOCK_TIMEOUT` seconds (default `3600`). This limits only acquisition
-waiting, never runtime after acquisition. The helper returns `75` on lock
-timeout and otherwise preserves the workload's exit code. Existing pipeline
-status/exit handling and Home Assistant start/stop interfaces are retained.
+`bin/with-gpu-lock.sh` requires `AIHUB_GPU_RUNNER_CONFIG`, a Python 3.11+ runner
+interpreter (`AIHUB_GPU_RUNNER_PYTHON`) and the canonical SDK in the child summary
+environment. Its trusted config must share the runner's journal, scope and
+original physical lock paths; the `/tmp` names above are examples, not permission
+to replace production locks. Missing config/package or mismatched locks fails
+closed. No standalone flock or direct HTTP fallback is used in managed stages.
+`AIHUB_GPU_LOCK_TIMEOUT` limits admission waiting, not runtime; timeout returns 75.
+The helper retains signal/exit handling and the HA start/stop interface.
 
-Lock files persist and are never unlinked on release. Closing the supervisor's
-descriptor releases the lock on success or failure. SIGINT/SIGTERM stop the
-managed foreground process group before release; unresponsive processes receive
-SIGKILL after a five-second interruption grace period. The descriptor is not
-inherited by workloads. Sourced stage calls forward parent signals and restore
-caller signal traps after ordinary completion.
+The admission check, native physical acquisition and durable claim are atomic
+under the existing runner contract. Do not nest a second GPU acquisition inside
+a stage. A known terminal result and verified backend cleanup are required for
+release. Interruption, lost replies or cleanup failure retain durable ownership
+even if the OS descriptor closes. Use exact operator-approved recovery; never
+delete the journal, unlink locks or bypass the runner to clear a hold. Legacy
+unwrapped clients must remain excluded.
 
-Reuse the helper for another foreground workload:
+For the supported meeting command vector (Python interpreter, summary script,
+transcript directory, then options), the helper binds selected approved aliases,
+approved turn corrections and the chunk index into stage identity. Private alias
+and correction snapshots are passed to the summarizer. Missing optional files
+remain missing; an explicitly selected missing alias file fails before admission.
+A changed approved input produces a new automatic ID or conflicts with a reused
+explicit `AIHUB_GPU_STAGE_ID`. Inputs changed while waiting prevent launch; changes
+during execution fail the stage after verified cleanup rather than cache success.
+Hold other semantic inputs, prompts and code stable during a stage; use a new
+reviewed ID for their intentional changes. No approval or speaker substitute is
+created by this mechanism.
+
+### Historical meeting summarization without recordings
+
+The supported entry point below consumes an existing, nonempty
+`chunks_out/transcript_chunks.jsonl`. It does not run WhisperX, rechunk audio,
+require a recording or change the audio-deletion policy. It acquires only GPU1
+through the shared runner and preserves map/reduce, recap and redactions.
+This command is a future live-use template, not authorization to run inference:
 
 ```bash
-bash bin/with-gpu-lock.sh gpu0 "SongGen (GPU0)" python /path/to/songgen.py
-bash bin/with-gpu-lock.sh gpu1 "Ollama meeting summaries (GPU1)" \
-  python bin/ollama_meeting_summary.py meeting-transcripts/session-123 --keep-recap
+MEETING_CONFIG_FILE="/approved/private/meeting.env" \
+MEETING_SUMMARIES_ROOT="/approved/private/new-comparison-output" \
+bash bin/summarize-existing-meeting.sh "/approved/existing/transcript-directory" --keep-recap
 ```
 
-It also accepts an explicit lock path instead of `gpu0`/`gpu1`. From a Bash
-script, source the helper and call `aihub_run_gpu_stage gpu0 LABEL COMMAND...`
-to forward signals from the calling script. Supply a foreground command, not a
-daemon-start request. Do not nest acquisition of the same resource. Direct
-WhisperX/Python invocations bypass scheduling unless wrapped with this helper.
-Locks coordinate cooperating callers; they do not stop existing unwrapped
-services or change Ollama's model keep-alive policy. All adopters must share the
-same local lock-file paths/inodes and have permission to open them; do not remove
-or rotate these files while jobs are running.
+The launcher sources the selected config (default `config/.env`). An explicitly
+supplied `MEETING_SUMMARIES_ROOT` wins over that file so comparison runs need not
+overwrite accepted output. Choose a fresh private destination and preserve existing
+outputs. Keep the configured normal models; no model upgrade is part of this work.
+Supported optional flags are `--keep-recap`, `--no-keep-recap`, and two-argument
+`--speaker-aliases`, `--map-model`, `--reduce-model`, `--map-num-ctx`,
+`--reduce-num-ctx`, `--keep-alive`, `--temperature`, `--ollama-url`.
+Whole-meeting modes, speaker suggestions and other flags are rejected. Omit
+`--speaker-aliases` unless an existing approved file is selected. Default approved
+files are the existing `speaker_aliases.json` and `speaker_turn_corrections.json`
+inside that transcript directory. Missing approvals remain unresolved.
 
-Run the real lock tests on Linux (no GPU, WhisperX, or Ollama required):
+Same ID/hash reconnects to prior completion without rerunning generation; it does
+not recreate deleted output files. Uncertain/interrupted work is never replayed
+automatically. Preserve private stage/client state for reconnect and recovery.
+
+With the canonical SDK available, run synthetic native Linux tests (no GPU jobs):
 
 ```bash
-python3 -m unittest discover -s tests -p test_gpu_locks.py -v
+python3 -B -m unittest discover -s tests -p test_meeting_stage_identity.py -v
+python3 -B -m unittest discover -s tests -p test_gpu_admission.py -v
 ```
 
 ## Notes on Ollama Usage

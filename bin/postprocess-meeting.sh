@@ -79,7 +79,7 @@ done
   printf '\n\n'
 } >> "$STATUSFILE"
 
-if aihub_run_gpu_stage gpu0 "WhisperX (GPU0)" "${CMD[@]}" >"$LOGFILE" 2>&1; then
+if AIHUB_GPU_STAGE_INPUT="$INPUT" AIHUB_GPU_STAGE_SETTINGS_FILE="$CONFIG_FILE" aihub_run_gpu_stage gpu0 "WhisperX (GPU0)" "${CMD[@]}" >"$LOGFILE" 2>&1; then
   {
     echo "Completed: $(date -Is)"
     echo "Success: yes"
@@ -114,7 +114,7 @@ if aihub_run_gpu_stage gpu0 "WhisperX (GPU0)" "${CMD[@]}" >"$LOGFILE" 2>&1; then
   fi
 
   if [ -f "$OUTDIR/chunks_out/transcript_chunks.jsonl" ]; then
-    if aihub_run_gpu_stage gpu1 "Ollama meeting summaries (GPU1)" python "$BASE_DIR/bin/ollama_meeting_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
+    if AIHUB_GPU_STAGE_INPUT="$OUTDIR/chunks_out/transcript_chunks.jsonl" AIHUB_GPU_STAGE_SETTINGS_FILE="$CONFIG_FILE" aihub_run_gpu_stage gpu1 "Ollama meeting summaries (GPU1)" python "$BASE_DIR/bin/ollama_meeting_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
       echo "Summaries: yes" >> "$STATUSFILE"
       echo "Summary dir: ${MEETING_SUMMARIES_ROOT:-$BASE_DIR/meeting-summaries}/$(basename "$OUTDIR")" >> "$STATUSFILE"
     else

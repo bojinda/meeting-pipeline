@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from meeting_postprocess.aliases import load_aliases
+from meeting_postprocess.gpu_admission import managed_generate, approved_input
 from meeting_postprocess.actions import filter_completed_request_tasks
 from meeting_postprocess.commitments import commitment_evidence
 from meeting_postprocess.motions import adjournment_announcements, correct_adjournment_roles
@@ -59,8 +60,10 @@ def call_ollama(
     )
 
     began = time.monotonic()
-    with urllib.request.urlopen(req, timeout=3600) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    data = managed_generate(ollama_url, payload, 3600)
+    if data is None:
+        with urllib.request.urlopen(req, timeout=3600) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
 
     if usage_callback is not None:
         usage_callback({"model": model, "num_ctx": num_ctx, "prompt_eval_count": data.get("prompt_eval_count") if type(data.get("prompt_eval_count")) is int else None,
@@ -369,11 +372,13 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             if redaction_warnings:
                 write_report(summaries_dir, redaction_warnings)
                 print(f"[qa] {len(redaction_warnings)} spoken-redaction warning(s); see minutes-qa.md", flush=True)
-            aliases = load_aliases(transcript_dir, args.speaker_aliases)
+            alias_bound, alias_path = approved_input('approved_aliases', args.speaker_aliases)
+            aliases = {} if alias_bound and alias_path is None else load_aliases(transcript_dir, alias_path)
+            _, correction_path = approved_input('approved_turn_corrections', transcript_dir / CORRECTIONS_FILE)
             catalog = None
-            if args.suggest_speakers_llm and args.speaker_review_mode == "two-pass" or (transcript_dir / CORRECTIONS_FILE).exists():
+            if args.suggest_speakers_llm and args.speaker_review_mode == "two-pass" or correction_path is not None and correction_path.exists():
                 catalog = turn_catalog(transcript_dir, chunks)
-                corrections = correction_document(transcript_dir)
+                corrections = correction_document(transcript_dir, correction_path)
                 turns = effective_turns(catalog, corrections, aliases)
                 redacted.chunks = corrected_chunks(redacted.chunks, catalog, corrections, aliases)
             if args.suggest_speakers:

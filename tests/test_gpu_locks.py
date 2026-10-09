@@ -12,6 +12,8 @@ import tempfile
 import time
 import unittest
 
+from gpu_admission_fixture import configure, recover_synthetic
+
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "bin" / "with-gpu-lock.sh"
 LINUX_FLOCK = sys.platform.startswith("linux") and all(shutil.which(tool) for tool in ("bash", "flock", "setsid"))
@@ -23,6 +25,7 @@ class GPULockTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.environment = dict(os.environ, AIHUB_GPU0_LOCK_FILE=str(self.root / "gpu0.lock"), AIHUB_GPU1_LOCK_FILE=str(self.root / "gpu1.lock"), AIHUB_GPU_LOCK_TIMEOUT="3")
+        self.controller = configure(self.root, self.environment)
         self.processes = []
 
     def tearDown(self):
@@ -75,42 +78,22 @@ class GPULockTests(unittest.TestCase):
     def test_two_gpu0_jobs_serialize(self):
         self.assert_serialization("gpu0")
 
-    def test_generic_fallback_paths_with_unset_or_empty_configuration(self):
-        source = HELPER.read_text()
-        fixture = self.root / "fallback-helper.sh"
-        for resource in ("gpu0", "gpu1"):
-            default = f"/tmp/aihub-{resource}.lock"
-            self.assertIn(default, source)
-            source = source.replace(default, str(self.root / f"aihub-{resource}.lock"))
-        # Rebase only /tmp destinations in this fixture so testing the default
-        # selection never acquires or creates shared installation lock files.
-        fixture.write_text(source)
-        for empty in (False, True):
-            env = dict(self.environment)
-            for variable in ("AIHUB_GPU0_LOCK_FILE", "AIHUB_GPU1_LOCK_FILE"):
-                if empty:
-                    env[variable] = ""
-                else:
-                    env.pop(variable, None)
-            for resource in ("gpu0", "gpu1"):
-                with self.subTest(resource=resource, empty=empty):
-                    process = self.launch(resource, "pass", helper=fixture, environment=env)
-                    _, logs = process.communicate(timeout=3)
-                    self.assertEqual(process.returncode, 0, logs)
-                    self.assertIn(str(self.root / f"aihub-{resource}.lock"), logs)
-                    self.assertTrue((self.root / f"aihub-{resource}.lock").exists())
+    def test_missing_runner_configuration_never_runs_workload(self):
+        env = dict(self.environment)
+        env.pop("AIHUB_GPU_RUNNER_CONFIG")
+        process = self.launch("gpu0", "print('must-not-run')", environment=env)
+        stdout, logs = process.communicate(timeout=3)
+        self.assertEqual(process.returncode, 64)
+        self.assertEqual(stdout, "")
+        self.assertIn("no standalone flock fallback", logs)
 
-    def test_explicit_environment_paths_override_generic_defaults(self):
-        env = dict(self.environment, AIHUB_GPU0_LOCK_FILE=str(self.root / "stable-resource-alpha.lock"), AIHUB_GPU1_LOCK_FILE=str(self.root / "stable-resource-beta.lock"))
-        for resource, variable in (("gpu0", "AIHUB_GPU0_LOCK_FILE"), ("gpu1", "AIHUB_GPU1_LOCK_FILE")):
-            with self.subTest(resource=resource):
-                process = self.launch(resource, "pass", environment=env)
-                _, logs = process.communicate(timeout=3)
-                self.assertEqual(process.returncode, 0, logs)
-                self.assertIn(env[variable], logs)
-                self.assertNotIn(f"/tmp/aihub-{resource}.lock", logs)
-                self.assertTrue(Path(env[variable]).exists())
-                self.assertFalse((self.root / f"{resource}.lock").exists())
+    def test_lock_overrides_cannot_split_shared_admission(self):
+        env = dict(self.environment, AIHUB_GPU0_LOCK_FILE=str(self.root / "wrong.lock"))
+        process = self.launch("gpu0", "print('must-not-run')", environment=env)
+        stdout, _ = process.communicate(timeout=3)
+        self.assertEqual(process.returncode, 64)
+        self.assertEqual(stdout, "")
+        self.assertFalse((self.root / "wrong.lock").exists())
 
     def test_two_gpu1_jobs_serialize(self):
         self.assert_serialization("gpu1")
@@ -185,7 +168,9 @@ class GPULockTests(unittest.TestCase):
                     self.assertEqual(Path(f"/proc/{child_pid}/stat").read_text().split()[2], "Z")
                 again = self.launch("gpu0", "pass", timeout=0)
                 again.communicate(timeout=3)
-                self.assertEqual(again.returncode, 0)
+                self.assertEqual(again.returncode, 75)
+                self.assertIn("gpu0", self.controller.snapshot()["owners"])
+                recover_synthetic(self.controller)
 
     def test_signals_while_waiting_do_not_run_workload(self):
         holder, _, release = self.holding_job()
@@ -212,7 +197,9 @@ class GPULockTests(unittest.TestCase):
                 self.assertFalse(Path(f"/proc/{workload_pid}").exists())
                 again = self.launch("gpu0", "pass", timeout=0)
                 again.communicate(timeout=3)
-                self.assertEqual(again.returncode, 0)
+                self.assertEqual(again.returncode, 75)
+                self.assertIn("gpu0", self.controller.snapshot()["owners"])
+                recover_synthetic(self.controller)
 
     def test_lock_descriptor_is_not_inherited_by_workload(self):
         lock = self.root / "gpu0.lock"
@@ -233,7 +220,9 @@ class GPULockTests(unittest.TestCase):
         self.assertFalse(Path(f"/proc/{workload_pid}").exists())
         again = self.launch("gpu0", "pass", timeout=0)
         again.communicate(timeout=3)
-        self.assertEqual(again.returncode, 0)
+        self.assertEqual(again.returncode, 75)
+        self.assertIn("gpu0", self.controller.snapshot()["owners"])
+        recover_synthetic(self.controller)
 
     def test_invalid_timeout_never_runs_workload(self):
         process = self.launch("gpu0", "print('must-not-run')", timeout="invalid")
@@ -264,8 +253,10 @@ class PipelineGPUStageTests(unittest.TestCase):
         self.conda.write_text("conda() { :; }\n")
         self.events = self.root / "events.jsonl"
         self.environment = dict(os.environ, GPU_TEST_PROJECT=str(self.project), GPU_TEST_CONDA=str(self.conda), GPU_TEST_EVENTS=str(self.events), GPU_TEST_CONTROL=str(self.root), AIHUB_GPU0_LOCK_FILE=str(self.root / "gpu0.lock"), AIHUB_GPU1_LOCK_FILE=str(self.root / "gpu1.lock"), AIHUB_GPU_LOCK_TIMEOUT="3", HF_TOKEN="test-token", PATH=str(self.binary) + ":" + os.environ["PATH"])
+        self.controller = configure(self.root, self.environment)
         self.processes = []
         (self.binary / "with-gpu-lock.sh").write_text(HELPER.read_text())
+        (self.binary / "meeting_stage_inputs.py").write_text((ROOT / "bin/meeting_stage_inputs.py").read_text())
         for profile in ("meeting", "lesson"):
             original = (ROOT / "bin" / f"postprocess-{profile}.sh").read_text()
             # Only relocate the existing machine-specific paths into fixtures;

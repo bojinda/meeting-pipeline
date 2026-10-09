@@ -82,9 +82,12 @@ def turn_catalog(directory: Path, chunks: list[dict] | None = None) -> dict:
     return {"version": 1, "meeting_id": str(directory.resolve()), "source_digest": digest(chunks), "turns": turns}
 
 
-def correction_document(directory: Path) -> dict:
-    path = directory / CORRECTIONS_FILE
-    if not path.exists():
+_DEFAULT_CORRECTION_SOURCE = object()
+
+
+def correction_document(directory: Path, source_path=_DEFAULT_CORRECTION_SOURCE) -> dict:
+    path = directory / CORRECTIONS_FILE if source_path is _DEFAULT_CORRECTION_SOURCE else source_path
+    if path is None or not path.exists():
         return {"version": 1, "meeting_id": str(directory.resolve()), "corrections": {}}
     data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict) or data.get("version") != 1 or data.get("meeting_id") != str(directory.resolve()) or not isinstance(data.get("corrections"), dict):

@@ -10,6 +10,8 @@ import sys
 import tempfile
 import unittest
 
+from gpu_admission_fixture import configure
+
 
 ROOT = Path(__file__).resolve().parents[1]
 LINUX_FLOCK = sys.platform.startswith("linux") and shutil.which("bash") and shutil.which("flock")
@@ -31,6 +33,7 @@ class MeetingRecordingCleanupTests(unittest.TestCase):
         script = script.replace('source "$HOME/miniconda3/etc/profile.d/conda.sh"', 'source "$CLEANUP_CONDA"')
         (binary / "postprocess-meeting.sh").write_text(script)
         (binary / "with-gpu-lock.sh").write_text((ROOT / "bin" / "with-gpu-lock.sh").read_text())
+        (binary / "meeting_stage_inputs.py").write_text((ROOT / "bin/meeting_stage_inputs.py").read_text())
         worker = '''#!/usr/bin/env python3
 import os,pathlib,sys
 args=sys.argv[1:]
@@ -55,6 +58,7 @@ else:
         recording = root / "meeting-recording.wav"
         recording.write_bytes(b"synthetic recording")
         env = dict(os.environ, CLEANUP_PROJECT=str(project), CLEANUP_CONDA=str(conda), CLEANUP_TRANSCRIPT=transcript, CLEANUP_WHISPER_EXIT=str(whisper_exit), HF_TOKEN="test-token", AIHUB_GPU0_LOCK_FILE=str(root / "gpu0.lock"), AIHUB_GPU1_LOCK_FILE=str(root / "gpu1.lock"), AIHUB_GPU_LOCK_TIMEOUT="3", PATH=str(binary) + ":" + os.environ["PATH"])
+        configure(root, env)
         result = subprocess.run(["bash", str(binary / "postprocess-meeting.sh"), str(recording)], env=env, capture_output=True, text=True, timeout=8)
         return result, recording, project / "meeting-transcripts" / recording.stem
 

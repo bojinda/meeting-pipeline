@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Historical map/reduce only: existing chunk index -> one shared GPU1 stage.
+set -euo pipefail
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG_FILE="${MEETING_CONFIG_FILE:-$BASE_DIR/config/.env}"
+HISTORICAL_OUTPUT_OVERRIDE="${MEETING_SUMMARIES_ROOT:-}"
+if [ -f "$CONFIG_FILE" ]; then
+  set -a
+  source "$CONFIG_FILE"
+  set +a
+fi
+if [ -n "$HISTORICAL_OUTPUT_OVERRIDE" ]; then
+  export MEETING_SUMMARIES_ROOT="$HISTORICAL_OUTPUT_OVERRIDE"
+fi
+if [ "$#" -lt 1 ]; then
+  echo "Usage: bash summarize-existing-meeting.sh TRANSCRIPT_DIR [map/reduce options]" >&2
+  exit 64
+fi
+TRANSCRIPT_DIR="$1"
+shift
+if [ ! -s "$TRANSCRIPT_DIR/chunks_out/transcript_chunks.jsonl" ]; then
+  echo "ERROR: an existing nonempty transcript chunk index is required" >&2
+  exit 66
+fi
+SUMMARY_OPTIONS=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --keep-recap|--no-keep-recap)
+      SUMMARY_OPTIONS+=("$1"); shift ;;
+    --speaker-aliases|--map-model|--reduce-model|--map-num-ctx|--reduce-num-ctx|--keep-alive|--temperature|--ollama-url)
+      if [ "$#" -lt 2 ]; then echo "ERROR: missing summary option value" >&2; exit 64; fi
+      SUMMARY_OPTIONS+=("$1" "$2"); shift 2 ;;
+    *) echo "ERROR: unsupported historical summary option; map/reduce only" >&2; exit 64 ;;
+  esac
+done
+source "$BASE_DIR/bin/with-gpu-lock.sh"
+AIHUB_GPU_STAGE_INPUT="$TRANSCRIPT_DIR/chunks_out/transcript_chunks.jsonl" \
+AIHUB_GPU_STAGE_SETTINGS_FILE="$CONFIG_FILE" \
+aihub_run_gpu_stage gpu1 "Historical meeting map/reduce (GPU1)" \
+  "${MEETING_SUMMARY_PYTHON:-${AIHUB_GPU_RUNNER_PYTHON:-python3}}" \
+  "$BASE_DIR/bin/ollama_meeting_summary.py" "$TRANSCRIPT_DIR" "${SUMMARY_OPTIONS[@]}"

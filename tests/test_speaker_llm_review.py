@@ -461,8 +461,11 @@ class LocalLockTests(unittest.TestCase):
     def test_real_supervisor_exposes_ownership_marker_while_lock_is_held(self):
         with tempfile.TemporaryDirectory() as directory:
             lock = str(Path(directory) / "gpu1.lock")
+            from gpu_admission_fixture import configure
+            environment = dict(os.environ, AIHUB_GPU1_LOCK_FILE=lock, AIHUB_GPU_LOCK_TIMEOUT="3")
+            configure(directory, environment)
             code = "import os,fcntl,json; f=open(os.environ['AIHUB_GPU1_LOCK_FILE'],'a');\ntry: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB); held=False\nexcept BlockingIOError: held=True\nprint(json.dumps([os.environ.get('AIHUB_GPU_LOCK_HELD_FILE'),held]))"
-            result = subprocess.run(["bash", str(ROOT / "bin" / "with-gpu-lock.sh"), "gpu1", "speaker test", sys.executable, "-c", code], env=dict(os.environ, AIHUB_GPU1_LOCK_FILE=lock, AIHUB_GPU_LOCK_TIMEOUT="3"), capture_output=True, text=True, timeout=5)
+            result = subprocess.run(["bash", str(ROOT / "bin" / "with-gpu-lock.sh"), "gpu1", "speaker test", sys.executable, "-c", code], env=environment, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout), [lock, True])
 
@@ -473,8 +476,11 @@ class LocalLockTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform.startswith("linux"), "Requires Linux util-linux flock")
     def test_private_request_stdin_survives_managed_background_launch(self):
         with tempfile.TemporaryDirectory() as directory:
+            from gpu_admission_fixture import configure
+            environment = dict(os.environ, AIHUB_GPU1_LOCK_FILE=str(Path(directory) / "gpu1.lock"), AIHUB_GPU_LOCK_TIMEOUT="3")
+            configure(directory, environment)
             code = "import json,sys; data=json.load(sys.stdin); print(json.dumps({'received':data['prompt']=='PRIVATE_SPEAKER_PACKET'}))"
-            result = subprocess.run(["bash", str(ROOT / "bin" / "with-gpu-lock.sh"), "gpu1", "private request test", sys.executable, "-c", code], input=json.dumps({"prompt": "PRIVATE_SPEAKER_PACKET"}), env=dict(os.environ, AIHUB_GPU1_LOCK_FILE=str(Path(directory) / "gpu1.lock"), AIHUB_GPU_LOCK_TIMEOUT="3"), capture_output=True, text=True, timeout=5)
+            result = subprocess.run(["bash", str(ROOT / "bin" / "with-gpu-lock.sh"), "gpu1", "private request test", sys.executable, "-c", code], input=json.dumps({"prompt": "PRIVATE_SPEAKER_PACKET"}), env=environment, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout), {"received": True})
 

@@ -265,6 +265,12 @@ def _http_call(request: dict) -> dict:
     payload = {"model": request["model"], "prompt": request["prompt"], "system": request.get("system", SYSTEM), "format": request.get("format", RESPONSE_SCHEMA), "stream": False, "keep_alive": request.get("keep_alive", "30m"), "options": {"temperature": 0, "num_ctx": request["num_ctx"], "num_predict": request.get("num_predict", _generation_budget(request["num_ctx"]))}}
     if request.get("think", False) is not None:
         payload["think"] = request.get("think", False)
+    from .gpu_admission import managed_generate
+    coordinated = managed_generate(request["ollama_url"], payload, request.get("timeout", 120))
+    if coordinated is not None:
+        if len(json.dumps(coordinated).encode("utf-8")) > 1048576:
+            raise ReviewFailure("ollama_response_limit")
+        return _completion(coordinated)
     http = urllib.request.Request(request["ollama_url"].rstrip("/") + "/api/generate", data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     with opener.open(http, timeout=request.get("timeout", 120)) as response:
