@@ -22,7 +22,7 @@ aihub_run_gpu_stage() {
 
 _aihub_gpu_lock_main() {
   if [ "$#" -lt 3 ]; then
-    echo "Usage: bash with-gpu-lock.sh gpu0|gpu1|CONFIGURED_LOCK LABEL COMMAND [ARG...]" >&2
+    echo "Usage: bash with-gpu-lock.sh gpu0|gpu1|gpu0+gpu1|CONFIGURED_LOCK LABEL COMMAND [ARG...]" >&2
     exit 64
   fi
   if [ -z "${AIHUB_GPU_RUNNER_CONFIG:-}" ]; then

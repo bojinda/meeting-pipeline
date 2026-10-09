@@ -427,7 +427,7 @@ created by this mechanism.
 
 The supported entry point below consumes an existing, nonempty
 `chunks_out/transcript_chunks.jsonl`. It does not run WhisperX, rechunk audio,
-require a recording or change the audio-deletion policy. It acquires only GPU1
+require a recording or change the audio-deletion policy. By default it acquires GPU1
 through the shared runner and preserves map/reduce, recap and redactions.
 This command is a future live-use template, not authorization to run inference:
 
@@ -448,6 +448,15 @@ Whole-meeting modes, speaker suggestions and other flags are rejected. Omit
 `--speaker-aliases` unless an existing approved file is selected. Default approved
 files are the existing `speaker_aliases.json` and `speaker_turn_corrections.json`
 inside that transcript directory. Missing approvals remain unresolved.
+
+An explicit `--dual-gpu-target NAME` selects the configured session-only dual
+target and `gpu0+gpu1`. It requires matching `AIHUB_GPU_DUAL_APPROVAL` and the
+operator-approved mode policy; no automatic mode selection or context/model change
+occurs. The same map/reduce/recap session holds both resources until model unload,
+backend readiness and original GPU1 placement/cleanup are verified. Uncertain
+switching/work retains both durable owners; reconnect never blindly replays.
+Routine historical commands and existing HA/transcription interfaces stay unchanged.
+See the canonical runner's dual session/deployment guide before any live use.
 
 Same ID/hash reconnects to prior completion without rerunning generation; it does
 not recreate deleted output files. Uncertain/interrupted work is never replayed
