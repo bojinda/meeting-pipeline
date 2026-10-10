@@ -12,7 +12,7 @@ from .speaker_turns import CORRECTIONS_FILE, TURNS_FILE, CONFLICTS_FILE
 
 PUBLIC_MEETING_FILENAMES = ("summary.md", "action-items.md", "minutes-draft.md")
 PRIVATE_MEETING_FILENAMES = frozenset({PRIVATE_REDACTION_FILENAME.casefold(), PRIVATE_SUGGESTIONS_FILENAME.casefold(), PRIVATE_ROSTER_FILENAME.casefold(), "speaker_aliases.json", CORRECTIONS_FILE, TURNS_FILE, CONFLICTS_FILE, "whole-source.json", "whole-evidence.json", "whole-plan.json", "whole-run.json", "whole-model-response.json", "chunk-plan.json", "chunk-comparison.json"})
-EDITORIAL_PRIVATE_FILENAMES = frozenset({"action-register.private.json", "action-register.private.md", "editorial-review.private.json", "operator-review.private.md", "editorial-response.private.json", "notes-evidence.private.json", "editorial-budgets.private.json"})
+EDITORIAL_PRIVATE_FILENAMES = frozenset({"action-register.private.json", "action-register.private.md", "editorial-review.private.json", "operator-review.private.md", "editorial-response.private.json", "notes-evidence.private.json", "editorial-budgets.private.json", "editorial-dispositions.private.json"})
 PRIVATE_MEETING_FILENAMES |= EDITORIAL_PRIVATE_FILENAMES
 
 

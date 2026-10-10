@@ -6,6 +6,7 @@ operator-review drafts. Reference checks do not certify paraphrase accuracy.
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -123,11 +124,12 @@ def model_register(register):
     """Compact presentation data; all full evidence remains in private JSON."""
     items = []
     for item in register["items"]:
-        support = local_support(item["task"], item["evidence"])
+        support = item.get("support") or local_support(item["task"], item["evidence"])
         items.append({**{key: item[key] for key in ("id", "category", "task", "owners", "member_facing", "concerns", "status")},
                       "source_ids": support["local_source_ids"], "support": support["status"]})
     return {"items": items, "evidence_scope": "bounded local candidates; complete provenance retained privately",
-            "validation": "operator_semantic_review_required"}
+            "validation": "unapproved_candidates; operator_semantic_review_required",
+            "selection_policy": "Excluded/private proposals remain in the private audit. Their absence does not remove substantive issues from source evidence or summaries. Discuss supported issues without promoting omitted actions into assignments."}
 
 
 def source_excerpts(records):
@@ -224,8 +226,9 @@ def _words(text):
     return set(re.findall(r"[\w]+", text.casefold())) - _STOP
 
 
-def _direct_support(quotes, identity, task):
-    """Exact local undertaking/assignment; exclude quoted speech and later actors."""
+def _direct_undertakings(quotes, identity):
+    """Source-owned commitment candidates, never proof of a proposed paraphrase."""
+    result = []
     for row in quotes:
         body = row["body"]
         if _QUOTED_FRAME.search(body) or re.search(r"\b(?:hypothetically|pretend|suppose|joking|kidding)\b", body, re.I):
@@ -239,9 +242,123 @@ def _direct_support(quotes, identity, task):
         if step:
             safe = body[:step.start()].rstrip(" ,;")
         analysis = re.sub(_FUTURE, "I will", safe, flags=re.I)
-        if _words(task) <= _words(safe) and _explicit_assignment(f"[{row['speaker']}] {analysis}", identity, task):
-            return f"[{row['speaker']}] {safe}"
-    return None
+        if _explicit_assignment(f"[{row['speaker']}] {analysis}", identity, analysis):
+            result.append(f"[{row['speaker']}] {safe}")
+    return result
+
+
+def _transfer_recipients(text):
+    # A narrow concrete-argument guard, not a general paraphrase verifier.
+    pattern = (r"\b(?:send|sent|share[ds]?|circulat(?:e[ds]?|ing)|forward(?:ed)?|"
+               r"distribut(?:e[ds]?|ing)|deliver(?:ed)?|provid(?:e[ds]?|ing)|give|gave)\b"
+               r"[^.!?;\n]*?\b(?:to|with)[,\s]+(?:(?:uh|um)[,\s]+)*(.+?)(?=[,.!?;\n]|$|"
+               r"\s+\b(?:after|before|if|when|once|tomorrow|today|next|and then)\b)")
+    # ASR fillers after a preposition do not change the explicitly named recipient.
+    explicit = [match[1] for match in re.finditer(pattern, text, re.I)]
+    # A direct pronoun recipient is recorded, but never mapped to a speaker ID.
+    pronouns = re.findall(r"\b(?:send|sent|give|gave)\s+(you|him|her|them|us)\b", text, re.I)
+    return explicit + pronouns
+
+
+def _check_transfer_recipients(task, proofs):
+    recipients = [r for proof in proofs for r in _transfer_recipients(proof) if r]
+    def words(text):
+        return {w.rstrip("s") if len(w) > 3 else w for w in _words(text)} - {"all", "both", "them", "him", "her", "you", "us"}
+    # Derive initial-letter equivalents only from recipient phrases in these
+    # proofs. No meeting-wide aliases or global acronym-to-person mapping.
+    equivalents = {}
+    for recipient in recipients:
+        for match in re.finditer(r"\b([a-z]{2,})\s+(?:and|&)\s+([a-z]{2,})\b", recipient, re.I):
+            key = (match[1][0].casefold(), match[2][0].casefold())
+            equivalents.setdefault(key, set()).add((match[1].casefold(), match[2].casefold()))
+    review = []
+    for recipient in _transfer_recipients(task):
+        normalized = words(recipient)
+        abbreviation = re.search(r"\b([a-z])\s*&\s*([a-z])\b", recipient, re.I)
+        if abbreviation:
+            expansions = equivalents.get((abbreviation[1].casefold(), abbreviation[2].casefold()), set())
+            if len(expansions) == 1:
+                expanded = next(iter(expansions))
+                normalized -= {abbreviation[1].casefold(), abbreviation[2].casefold()}
+                normalized |= words(" ".join(expanded))
+            elif len(expansions) > 1 or not any(normalized <= words(r) for r in recipients):
+                review.append("recipient_equivalence_review")
+                continue
+        if normalized and not any(normalized <= words(r) for r in recipients):
+            if any(not words(r) or re.search(r"\b[a-z]\s*&\s*[a-z]\b", r, re.I) for r in recipients):
+                review.append("recipient_equivalence_review")
+            else:
+                raise EditorialFailure("unsupported_recipient")
+    return review
+
+
+def _qualification_parts(text):
+    text = re.sub(r"^\[[^]]+\]\s*", "", text.strip())
+    future = re.search(_FUTURE, text, re.I)
+    condition, action = "", text
+    if future:
+        lead, action = text[:future.start()].strip(" ,;"), text[future.end():].strip()
+        if re.match(r"^(?:if|when|once|unless)\b", lead, re.I):
+            condition = lead
+    else:
+        prefix = re.match(r"^((?:if|when|once|unless|provided|subject to|in the event)\b.*?),\s*(.+)$", text, re.I)
+        if prefix:
+            condition, action = prefix.groups()
+    trailing = re.search(r"\s+((?:if|when|once|unless)\b.*)$", action, re.I)
+    if trailing and not re.search(r"\b(?:see|check|ask|find out)$", action[:trailing.start()].strip(), re.I):
+        condition, action = trailing[1], action[:trailing.start()]
+    return condition, action
+
+
+def _polarity(text):
+    normalized = re.sub(r"\bfail(?:s|ed)?\s+to\b|\b\w+n['’]t\b", "not", text, flags=re.I)
+    negative = bool(re.search(r"\b(?:not|never|unless|cannot)\b", normalized, re.I))
+    grammar = {"not", "never", "unless", "cannot", "if", "when", "once", "will", "do", "does", "did", "try", "attempt"}
+    predicate = {w.rstrip("s") if len(w) > 3 else w for w in _words(normalized) - grammar}
+    return negative, predicate
+
+
+def _check_undertaking_arguments(task, proofs):
+    condition, action = _qualification_parts(task)
+    scopes = list(dict.fromkeys(piece.strip() for proof in proofs
+                               for piece in re.split(r"(?<=[.!?;])\s+|\n|\s+and\s+(?=" + _FUTURE + r")", proof, flags=re.I)
+                               if re.search(_FUTURE + r"|\b(?:will|must|agreed to|is assigned to|is responsible for)\b", piece, re.I)))
+    scores = [len(_words(action) & _words(_qualification_parts(scope)[1])) for scope in scopes]
+    best = max(scores, default=0)
+    candidates = [scope for scope, score in zip(scopes, scores) if score == best and score > 0]
+    if len(candidates) != 1:
+        return ["qualification_relationship_review"] + _check_transfer_recipients(task, proofs)
+    selected = candidates[0]
+    prior_condition, prior_action = _qualification_parts(selected)
+    # Pronoun recovery is not invented here. Keep the original bounded proof
+    # available for recipient review when the source says only "do that".
+    review = _check_transfer_recipients(task, proofs)
+    if sum(score > 0 for score in scores) > 1 and re.search(r"\band\b", action, re.I):
+        review.append("qualification_relationship_review")
+    if prior_condition and not condition:
+        raise EditorialFailure("lost_commitment_qualification")
+    if re.search(r"\btry\b", prior_action, re.I) and not re.search(r"\b(?:try|attempt)\b", action, re.I):
+        raise EditorialFailure("lost_commitment_qualification")
+    for prior, proposed in ((prior_condition, condition), (prior_action, action)):
+        before, before_words = _polarity(prior)
+        after, after_words = _polarity(proposed)
+        if before != after:
+            if before_words and before_words == after_words:
+                raise EditorialFailure("contradictory_task_polarity")
+            review.append("qualification_relationship_review")
+    if condition and not prior_condition:
+        review.append("qualification_relationship_review")
+    return review
+
+
+def _completion_evidence(quotes):
+    for row in quotes:
+        for clause in re.split(r"[.!?;]", row["body"]):
+            match = re.search(r"\b(?:already|sent|completed|finished|done|noted|recorded|accepted)\b", clause, re.I)
+            if match and not re.search(r"\b(?:not|never|haven['’]t|hadn['’]t|didn['’]t|isn['’]t|wasn['’]t|"
+                                       r"will|would|should|if|when|once)\b|" + _FUTURE, clause[:match.end()], re.I):
+                return True
+    return False
 
 
 def validate_register(raw, records, commitments, source):
@@ -261,11 +378,10 @@ def validate_register(raw, records, commitments, source):
         seen.add(item["id"])
         quotes = _refs(item["source_ids"], records)
         evidence = "\n".join(r["text"] for r in quotes)
-        # An existing source ID does not support arbitrary tasks. Material words
-        # added by a paraphrase require operator revision, never silent acceptance.
-        material = _words(item["task"])
-        if not material or not material <= _words(evidence):
-            raise EditorialFailure("unsupported_task_wording")
+        # Lexical mismatch is uncertainty, not evidence that a paraphrase is
+        # false (or true). Structural actor/status/argument guards stay separate.
+        if not _words(item["task"]):
+            raise EditorialFailure("invalid_task_wording")
         support = local_support(item["task"], quotes)
         if support["status"] == "uncertain_local_support":
             findings.append({"code": "action_support_review", "item_id": item["id"], **support})
@@ -275,7 +391,9 @@ def validate_register(raw, records, commitments, source):
                 lines = proof.splitlines()
                 if all(any(line == r["text"] or r["text"].startswith(line) for r in quotes) for line in lines):
                     own.append(proof)
-            if not any(material <= _words(proof) for proof in own) and not any(_direct_support(quotes, owner, item["task"]) for owner in item["owners"]):
+            direct = {identity: _direct_undertakings(quotes, identity)
+                      for owner in item["owners"] for group in _owner_groups(owner) for identity in group}
+            if not own and not any(direct.values()):
                 raise EditorialFailure("unsupported_undertaking")
             # Every owner must be supported in the cited passage, including
             # distinct people in a model-supplied multi-owner field.
@@ -283,28 +401,31 @@ def validate_register(raw, records, commitments, source):
                 if re.search(r"[()]", owner):
                     raise EditorialFailure("unsupported_owner_annotation")
                 for identities in _owner_groups(owner):
-                    if not identities or not any(
-                        any(proof.splitlines()[-1].startswith(f"[{identity}]") and material <= _words(proof) for proof in own)
-                        or _direct_support(quotes, identity, item["task"]) for identity in identities
-                    ):
+                    proofs = [proof for identity in identities for proof in own
+                              if proof.splitlines()[-1].startswith(f"[{identity}]")]
+                    proofs += [proof for identity in identities for proof in direct.get(identity, [])]
+                    if not identities or not proofs:
                         raise EditorialFailure("unsupported_owner")
-            # Preserve conditions/qualification; review rather than upgrading a
-            # qualified promise to an unconditional assignment.
-            proofs = own + [proof for owner in item["owners"] if (proof := _direct_support(quotes, owner, item["task"]))]
-            for proof in proofs:
-                for qualifier in ("if", "when", "once", "try"):
-                    if re.search(r"\b" + qualifier + r"\b", proof, re.I) and not re.search(r"\b" + qualifier + r"\b", item["task"], re.I):
-                        raise EditorialFailure("lost_commitment_qualification")
+                    for code in _check_undertaking_arguments(item["task"], proofs):
+                        findings.append({"code": code, "item_id": item["id"], "source_ids": item["source_ids"]})
+                        support["status"] = "uncertain_local_support"
+            if not item["owners"]:
+                for code in _check_undertaking_arguments(item["task"], own):
+                    findings.append({"code": code, "item_id": item["id"], "source_ids": item["source_ids"]})
+                    support["status"] = "uncertain_local_support"
             candidate = "# Action Items\n- " + (" and ".join(item["owners"]) or "Unassigned") + ": " + item["task"]
             if filter_completed_request_tasks(candidate, source, future_evidence=commitments) != candidate:
                 raise EditorialFailure("rejected_action_semantics")
-        elif item["category"] == "completed" and not re.search(r"\b(?:already|sent|completed|finished|done|noted|recorded|accepted)\b", evidence, re.I):
+        elif item["category"] == "completed" and not _completion_evidence(quotes):
             raise EditorialFailure("unsupported_completion")
         elif item["category"] == "ongoing" and not re.search(r"\b(?:grieving|grievances?|pending|ongoing|working|in progress)\b", evidence, re.I):
             raise EditorialFailure("unsupported_ongoing_status")
         elif item["category"] == "external" and not re.search(r"\b(?:said|reported|promised|email|conference|convention|management)\b", evidence, re.I):
             raise EditorialFailure("unsupported_external_status")
         if item["category"] != "undertaking":
+            for code in _check_transfer_recipients(item["task"], [r["body"] for r in quotes]):
+                findings.append({"code": code, "item_id": item["id"], "source_ids": item["source_ids"]})
+                support["status"] = "uncertain_local_support"
             # Named outside owners are reports, not speaker aliases/assignments.
             if any(not all(identity in evidence for group in _owner_groups(owner) for identity in group)
                    for owner in item["owners"]):
@@ -317,7 +438,10 @@ def validate_register(raw, records, commitments, source):
         if (item["category"] == "undertaking" and not item["owners"]) or any(SPEAKER_LABEL.search(n) for n in item["owners"]):
             findings.append({"code": "unverified_owner", "item_id": item["id"]})
         findings.extend({"code": c, "item_id": item["id"]} for c in item["concerns"])
-        items.append({**item, "status": STATUS[item["category"]], "evidence": quotes, "support": support})
+        status = STATUS[item["category"]]
+        if support["status"] == "uncertain_local_support":
+            status = "Proposed " + item["category"] + "; semantic support requires operator review"
+        items.append({**item, "status": status, "evidence": quotes, "support": support})
     # A model cannot silently omit explicit source evidence to shorten a list.
     used = "\n".join(r["text"] for item in items for r in item["evidence"])
     for number, proof in enumerate(commitments, 1):
@@ -325,6 +449,96 @@ def validate_register(raw, records, commitments, source):
             findings.append({"code": "commitment_coverage_review", "evidence_number": number})
     return {"version": 1, "source_hash": digest(records), "categories": CATEGORIES,
             "items": items, "findings": findings, "validation": "references_and_action_guards_checked; operator_semantic_review_required"}
+
+
+def audit_register(raw, records, commitments, source, *, supplied=None):
+    """Assess every proposal without deleting/rewording it or certifying semantics."""
+    if not _object(raw, "items") or not _list(raw["items"]):
+        raise EditorialFailure("invalid_register_schema")
+    outcomes, seen = [], set()
+    for index, item in enumerate(raw["items"]):
+        identifier = item.get("id") if isinstance(item, dict) else None
+        outcome = {"position": index, "item_id": identifier, "outcome": "review_required", "findings": []}
+        try:
+            validated = validate_register({"items": [item]}, records, commitments, source)
+            if identifier in seen:
+                raise EditorialFailure("duplicate_register_id")
+            if supplied is not None and any(key not in supplied for key in item["source_ids"]):
+                raise EditorialFailure("unsupplied_action_evidence")
+            outcome["findings"] = [f for f in validated["findings"] if f["code"] != "commitment_coverage_review"]
+            outcome["support"] = validated["items"][0]["support"]
+        except EditorialFailure as exc:
+            outcome.update(outcome="hard_block", failure_category=str(exc))
+        if isinstance(identifier, str):
+            seen.add(identifier)
+        outcomes.append(outcome)
+    blocked = sum(row["outcome"] == "hard_block" for row in outcomes)
+    return {"source_hash": digest(records), "proposed_register": raw, "sources": records,
+            "outcomes": outcomes, "hard_block_count": blocked, "publication_status": "review_hold",
+            "assessment_limit": "First hard violation per action; review findings are not semantic approval.",
+            "register": None if blocked else validate_register(raw, records, commitments, source)}
+
+
+def register_review_checklist(assessment):
+    lines = ["# Private Register Review", "", "Publication/export hold — no action is semantically approved.", "",
+             "Every original proposal and source record is retained in editorial-response.private.json.",
+             "Lexical uncertainty requires checking the task, actor, recipient, status and conditions together.", ""]
+    for result, item in zip(assessment["outcomes"], assessment["proposed_register"]["items"]):
+        codes = [result["failure_category"]] if result["outcome"] == "hard_block" else [f["code"] for f in result["findings"]]
+        lines += [f"- [ ] {result['item_id'] or 'Invalid item'}: {result['outcome']} — {', '.join(codes) or 'operator_semantic_review_required'}"]
+        if isinstance(item, dict):
+            lines += ["  Original proposal: " + json.dumps(item, ensure_ascii=False)]
+        lines += [f"  Complete evidence: {RESPONSE}#/register_assessment/sources; proposal index {result['position']}.", ""]
+    return "\n".join(lines) + "\n"
+
+
+def triage_register(assessment, records, commitments, source):
+    """Automatic candidate projection; original failures are retained, not waived."""
+    proposed = assessment["proposed_register"]["items"]
+    identifiers = [i.get("id") for i in proposed if isinstance(i, dict) and isinstance(i.get("id"), str)]
+    candidates, exclusions = [], []
+    for outcome in assessment["outcomes"]:
+        position = outcome["position"]
+        item = proposed[position]
+        reason = outcome.get("failure_category") if outcome["outcome"] == "hard_block" else None
+        if reason is None:
+            if identifiers.count(item["id"]) != 1:
+                reason = "ambiguous_duplicate_id"
+            elif not item["member_facing"]:
+                reason = "private_action_selection"
+            else:
+                reason = next((c for c in item["concerns"] if c in {
+                    "source_conflict", "confidentiality", "uncertain_identity", "incomplete_coverage"}), None)
+            if reason is None and any(_SENSITIVE.search(records[key]["text"]) or
+                                      _IDENTIFYING_CASE.search(records[key]["text"]) for key in item["source_ids"]):
+                reason = "source_confidentiality_review"
+            # Financial-document references stay private even in plural/hyphenated
+            # form. This presentation exclusion does not change the original audit.
+            if reason is None and any(re.search(r"\bpay[ -]?stubs?\b", text, re.I) for text in
+                                      [item["task"], *(records[key]["text"] for key in item["source_ids"])]):
+                reason = "financial_confidentiality_review"
+            if reason is None:
+                try:
+                    # A safe source candidate can still be unsafe to present,
+                    # e.g. a task containing an unresolved speaker ID or markup.
+                    _plain(item["task"])
+                except EditorialFailure as exc:
+                    reason = str(exc)
+        if reason is not None:
+            exclusions.append({"code": "excluded_action_review", "item_id": outcome["item_id"],
+                               "proposal_index": position, "reason": reason,
+                               "original_outcome": outcome["outcome"],
+                               "evidence_pointer": f"{REGISTER}#/original_assessment/proposed_register/items/{position}"})
+        else:
+            candidates.append(deepcopy(item))
+    # Reuse all action guards and coverage checks for the selected projection.
+    # An empty projection is valid: source-grounded issue notes can still run.
+    register = validate_register({"items": candidates}, records, commitments, source)
+    for item in register["items"]:
+        item["status"] = "Unapproved " + item["category"] + " candidate; wording, ownership and status require operator review"
+    register.update(automatic_triage=True, original_assessment=deepcopy(assessment), exclusions=exclusions)
+    register["findings"].extend(exclusions)
+    return register
 
 
 def _plain(text):
@@ -379,10 +593,10 @@ def undertaking_table(register):
         if item["category"] != "undertaking" or not item["member_facing"]:
             continue
         task = _plain(item["task"])
-        owner = "; ".join(item["owners"]) if item["owners"] and not any(SPEAKER_LABEL.search(n) for n in item["owners"]) else "Owner awaiting confirmation"
+        owner = "; ".join(item["owners"]) if not register.get("automatic_triage") and item["owners"] and not any(SPEAKER_LABEL.search(n) for n in item["owners"]) else "Owner awaiting confirmation"
         owner = _plain(owner)
         lines.append(f"| {task} | {owner} | {item['status']} |")
-    return "\n".join(lines) if len(lines) > 2 else "No verified member-facing undertakings available; review remains pending."
+    return "\n".join(lines) if len(lines) > 2 else "No member-facing undertaking candidates selected; private review remains pending."
 
 
 def render_notes(notes, register):
@@ -443,26 +657,35 @@ def review_groups(register, notes, flags, records):
         "uncertain_identity": "Resolve the identity only if needed for member-facing wording or ownership.",
         "source_conflict": "Compare the conflicting source passages; preserve corrections and qualifications.",
         "action_support_review": "Check the task as a whole against a small local passage; scattered words do not establish an action.",
+        "qualification_relationship_review": "Match each condition and qualification to its actual undertaking; do not borrow one from another action by the same speaker.",
+        "recipient_equivalence_review": "Verify the local recipient phrase or acronym, or the person addressed by a pronoun; do not invent an alias or speaker mapping.",
         "notes_support_review": "Compare this claim with its local cited passage; revise the claim or references if support is uncertain.",
         "confidentiality": "Confirm whether this detail and any associated document may reach the intended audience.",
+        "excluded_action_review": "Review the original proposal, cited sources and exclusion reason. It is withheld from the action projection, not approved or discarded. Assess any underlying workplace issue separately for appropriately qualified, non-identifying discussion.",
     }
     # All selected owners need verification, including names/roles without labels.
     for item in register["items"]:
         if item["member_facing"] and item["category"] == "undertaking":
             flags = flags + [{"code": "owner_verification", "item_id": item["id"]}]
     for flag in flags:
-        item = by_id.get(flag.get("item_id"))
+        identifier = flag.get("item_id")
+        item = by_id.get(identifier) if isinstance(identifier, str) else None
         public = item is None or item["member_facing"]
         code = flag["code"]
-        if code in {"unverified_owner", "uncertain_identity", "owner_verification"}:
+        if code == "excluded_action_review":
+            reason = flag["reason"]
+            group = "private_background" if reason == "private_action_selection" else "confidentiality" if "confidential" in reason else "substantive_conflicts"
+        elif code in {"unverified_owner", "uncertain_identity", "owner_verification"}:
             group = "member_undertaking_owners" if item and public and item["category"] == "undertaking" else "member_content" if public else "private_background"
         elif code == "confidentiality":
             group = "confidentiality"
-        elif code in {"source_conflict", "action_support_review", "notes_support_review"}:
+        elif code in {"source_conflict", "action_support_review", "notes_support_review", "qualification_relationship_review", "recipient_equivalence_review"}:
             group = "substantive_conflicts" if public else "private_background"
         else:
             group = "member_content" if public else "private_background"
         entry = {**flag, "instruction": instructions.get(code, "Review the cited source, wording, status and publication relevance before release.")}
+        if code == "excluded_action_review":
+            entry["instruction"] += f" Exclusion: {flag['reason']}; original audit: {flag['original_outcome']}."
         if item:
             entry.update(task=item["task"], owners=item["owners"], category=item["category"], member_facing=item["member_facing"],
                          local_source_ids=local_support(item["task"], item["evidence"])["local_source_ids"],
@@ -504,7 +727,7 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
     for group in groups:
         checklist += [f"## Priority {group['priority']} — {group['heading']}", ""]
         for entry in group["entries"]:
-            label = entry["code"] + (": " + entry["item_id"] if "item_id" in entry else "")
+            label = entry["code"] + (": " + str(entry["item_id"]) if "item_id" in entry else "")
             checklist += [f"- [ ] {label} — {entry['instruction']}"]
             if "task" in entry:
                 checklist += [f"  Task: {entry['task']} Owners: {', '.join(entry['owners']) or 'Unassigned'}."]
@@ -518,6 +741,11 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
     review = {"status": "review_hold", "source_hash": register["source_hash"], "register_hash": digest(register),
               "notes_word_count": len(document.split()), "findings": flags, "review_groups": groups,
               "required": ["meeting_date", "owner_verification", "semantic_fact_review", "confidentiality", "distribution_authority"]}
+    assessment = register.get("original_assessment")
+    if assessment is not None:
+        review.update(register_outcomes=assessment["outcomes"], hard_block_count=assessment["hard_block_count"],
+                      action_exclusions=register["exclusions"], candidate_approval="none")
+        checklist += ["## Complete original register audit", "", register_review_checklist(assessment)]
     blocks = [b for key in ("highlights", "previous_context", "motions", "unresolved") for b in notes[key]]
     blocks += [b for issue in notes["issues"] for b in issue["paragraphs"]]
     cited = {key for block in blocks for key in block["source_ids"]}
@@ -535,9 +763,11 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
             if item["category"] == key:
                 internal += [f"- {item['id']}: {item['task']}", f"  - Owners: {', '.join(item['owners']) or 'Unassigned'}; {item['status']}",
                              f"  - Source: {', '.join(item['source_ids'])}", ""]
+    if assessment is not None:
+        internal += ["## Complete original model register and validation findings", "", register_review_checklist(assessment)]
     private_text(directory / REGISTER_MD, "\n".join(internal))
-    # No member document is written until all schemas, action guards and
-    # confidentiality checks have succeeded. The hold is written first.
+    # Only checked candidates enter the shared table. Original blocked actions
+    # remain private. Notes safeguards must succeed before any member draft.
     outputs = {"meeting-notes-draft.md": document,
                "action-items.md": "# Recorded Undertakings\n\nDraft for operator review.\n\n" + table + "\n",
                "summary.md": "# Meeting Highlights\n\n" + "\n".join("- " + b["text"] for b in notes["highlights"]) + "\n",
@@ -553,7 +783,7 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
     write_private_json(directory / REVIEW, {"status": "review_hold", "phase": "incomplete"})
     records = source_records(chunks)
     source = "\n".join(c["text"] for c in chunks if c["meeting_section"] in {BUSINESS, ADJOURNMENT})
-    raw = {}
+    raw, assessment = {}, None
     def request(stage, prompt, structured=False):
         measured = budget.measure(stage, prompt, structured)
         write_private_json(directory / BUDGETS, {"requests": budget.measurements})
@@ -564,31 +794,35 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
         raw["register"] = request("register", register_prompt(prompts, records, current, commitments, context), True)
         proposed = json.loads(raw["register"])
         supplied = {r["id"] for r in register_input(records, commitments, context) if len(r["text"]) <= LOCAL_CHARS}
-        if isinstance(proposed, dict) and isinstance(proposed.get("items"), list):
-            for item in proposed["items"]:
-                if isinstance(item, dict) and isinstance(item.get("source_ids"), list) and any(not isinstance(i, str) or i not in supplied for i in item["source_ids"]):
-                    raise EditorialFailure("unsupplied_action_evidence")
-        register = validate_register(proposed, records, commitments, source)
+        assessment = audit_register(proposed, records, commitments, source, supplied=supplied)
+        write_private_json(directory / RESPONSE, {"source_hash": digest(records), "responses": raw, "register_assessment": assessment})
+        register = triage_register(assessment, records, commitments, source)
         write_private_json(directory / REGISTER, register)
         raw["notes"] = request("notes", notes_prompt(prompts, records, combined, register), True)
         visible = {key: row for key, row in records.items() if len(row["text"]) <= LOCAL_CHARS}
         notes = validate_notes(json.loads(raw["notes"]), visible, source)
         for key in records.keys() - visible.keys():
             register["findings"].append({"code": "source_excerpt_coverage_review", "source_id": key})
-        detailed = request("detailed", detailed_prompt(prompts, records, current, register))
+        raw["detailed"] = request("detailed", detailed_prompt(prompts, records, current, register))
+        detailed = raw["detailed"]
         if keep_recap and recap:
-            historical = request("recap", (prompts / "recap_prompt.txt").read_text(encoding="utf-8").replace("{chunk_summaries}", recap))
+            raw["recap"] = request("recap", (prompts / "recap_prompt.txt").read_text(encoding="utf-8").replace("{chunk_summaries}", recap))
+            historical = raw["recap"]
             detailed = insert_recap(detailed, historical)
         detailed = prepare_text(clean_speaker_annotations(detailed, source, aliases, approved_passages=approved), aliases)
         detailed = correct_adjournment_roles(detailed, source)
         detailed = strip_private_references(strip_chunk_references(detailed, [c.get("file_name", "") for c in chunks]))
+        write_private_json(directory / RESPONSE, {"source_hash": digest(records), "responses": raw, "register_assessment": assessment})
         review = finish(directory, register, notes, detailed, source, warnings, records=records)
         print(f"[editorial] review hold; {review['notes_word_count']} words; {len(review['findings'])} finding(s)", flush=True)
         return 0
     except Exception as exc:
         category = str(exc) if isinstance(exc, EditorialFailure) else "invalid_json_or_generation_failure"
         # Responses contain private source data. Never print exception/model text.
-        write_private_json(directory / RESPONSE, {"source_hash": digest(records), "responses": raw})
-        write_private_json(directory / REVIEW, {"status": "review_hold", "phase": "failed", "failure_category": category})
+        write_private_json(directory / RESPONSE, {"source_hash": digest(records), "responses": raw, "register_assessment": assessment})
+        write_private_json(directory / REVIEW, {"status": "review_hold", "phase": "failed", "failure_category": category,
+                                               "register_outcomes": assessment["outcomes"] if assessment else []})
+        if assessment and not (directory / CHECKLIST).exists():
+            private_text(directory / CHECKLIST, register_review_checklist(assessment))
         print(f"[editorial] incomplete: {category}; no publication authorized", flush=True)
         return 1

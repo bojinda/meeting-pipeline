@@ -1226,6 +1226,29 @@ are explicit evidence gaps requiring review, never clipped or treated as support
 Small consecutive evidence ranges (up to three lines / 1,800 characters) are
 preferred. Lexical support checks flag uncertain claims and actions, including
 material words scattered across unrelated passages. They do not verify semantics.
+Ordinary paraphrases are retained unchanged with an explicit semantic-review
+finding and a proposed status when lexical support is uncertain. Source-owned
+commitment candidates establish an actor's recorded undertaking, not semantic
+support for the model's task. Concrete recipient changes, wrong actors, lost
+conditions, unsupported completion and confidentiality violations still block.
+Every register proposal is assessed, even after a hard violation. Automatic
+triage retains the complete original register, sources, findings and hard-block
+results privately, while projecting only reviewable, non-private candidates.
+Hard-blocked actions, ambiguous duplicate IDs, explicit conflicts/identity gaps,
+confidential source passages and unsafe display text stay out of the projection.
+All projected records remain unapproved candidates; public owner labels remain
+awaiting confirmation. No original proposal is approved, deleted or reclassified.
+
+Per-action failures do not stop the existing notes and detailed-minutes reductions,
+even if no action candidates remain. Both still receive the established summaries
+and source evidence; excluding an action does not suppress its underlying issue.
+The actual notes response must pass the existing source-reference, confidentiality
+and structural checks before rendering. Invalid top-level register JSON/schema or
+failed notes validation still stops with private diagnostics. The same three
+reduction calls are used; there is no manually written notes fallback. Actual
+register, notes and detailed responses are retained in `editorial-response.private.json`.
+The source-linked private register and checklist retain every original outcome
+alongside explicit projection-exclusion reasons.
 
 Editorial mode requires a matching local `tokenizer.json` via
 `--meeting-notes-tokenizer` or `MEETING_NOTES_TOKENIZER`, the optional Python
@@ -1258,6 +1281,19 @@ exact source references and conservative task/owner evidence; it does not certif
 all model paraphrases. Unsupported task wording, invalid schemas, fabricated
 references and detected identifying/private content fail closed. Failed model
 responses stay private and source-bound; diagnostic logs contain category codes.
+
+For explicitly approved offline editorial dispositions, the Python API
+`meeting_postprocess.editorial_dispositions.prepare_held_draft` accepts the
+original register, exact source records, complete commitment evidence, reviewed
+notes and a separate disposition manifest. The manifest binds source, commitment evidence, original
+register and original audit-result hashes and records one disposition for every
+proposal. Selected derivatives must pass existing guards; an original hard-blocked
+item cannot be selected. Private exclusions retain their original findings and
+evidence. This API writes a new held directory, has no inference/resume path and
+never applies speaker aliases or confirms public owner names. This optional tool
+supports later operator review and is not required for the automatic initial
+held draft. Disposition approval authorizes drafting only; notes, identities,
+audience and distribution still require operator review.
 
 All editorial results carry a review hold. Review includes date, identity, material
 source conflicts, corrections, unresolved concerns, confidentiality and distribution

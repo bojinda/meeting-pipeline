@@ -20,11 +20,12 @@ Use six distinct categories:
 - completed: work already done, including an explanation delivered in this meeting.
 - business: recorded motions/dispositions and other business that is not a task.
 
-Task wording must use the cited source's material words. Prefer a short exact
-task span, removing only first-person future framing where safe. Keep objects,
+Use a concise source-grounded task description. Ordinary paraphrases are allowed;
+they must preserve the same action, actors and scope. Keep objects,
 recipients, conditions, uncertainty and qualifications such as "try to". Add no
-synonyms or details absent from the cited passage. Do not assign another actor's
-later delivery/redaction step to the original speaker. A promise to raise a
+unsupported details or certainty. Flag uncertain paraphrases for operator review.
+Do not assign another actor's later delivery/redaction step to the original
+speaker. A promise to raise a
 proposal is not a promise to implement it. Preserve local contextual commitments
 with all supporting source IDs; a bare pronoun without continuity is insufficient.
 

@@ -250,7 +250,7 @@ class EditorialTests(unittest.TestCase):
         self.assertIn("source_conflict", codes)
 
     def test_malformed_reduction_has_no_member_documents(self):
-        for bad in ("", "{", '{"items":null}', '{"items":[{}]}'):
+        for bad in ("", "{", '{"items":null}'):
             with self.subTest(bad=bad), tempfile.TemporaryDirectory() as tmp:
                 calls = []
                 def generate(prompt, **kwargs):
@@ -279,6 +279,38 @@ class EditorialTests(unittest.TestCase):
             for name in ("meeting-notes-draft.md", "action-items.md", "minutes-draft.md", "summary.md"):
                 self.assertFalse((Path(tmp) / name).exists())
             self.assertEqual(json.loads((Path(tmp) / ed.REVIEW).read_text())["failure_category"], "invalid_notes_schema")
+
+    def test_triaged_register_retains_all_proposals_and_actionable_findings(self):
+        raw = copy.deepcopy(self.raw)
+        raw["items"] = raw["items"][:3]
+        raw["items"][0]["task"] = "Circulate committee minutes to health and safety committees after this meeting."
+        raw["items"][1]["source_ids"] = ["fabricated"]
+        raw["items"][2]["owners"] = ["Riley"]
+        calls = []
+        def generate(prompt, **kwargs):
+            calls.append(prompt)
+            return (json.dumps(raw), json.dumps(self.notes), "# Detailed Minutes\nSource-grounded fixture.")[len(calls) - 1]
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            directory = Path(tmp)
+            status = ed.run(directory, self.chunks, "summary", "current", "recap", self.commitments, [], {}, [], [],
+                            ROOT / "prompts/meeting", generate, False, budget=self.budget())
+            self.assertEqual(status, 0)
+            self.assertEqual(len(calls), 3)
+            response = json.loads((directory / ed.RESPONSE).read_text())
+            self.assertEqual(json.loads(response["responses"]["register"]), raw)
+            assessment = response["register_assessment"]
+            self.assertEqual(assessment["proposed_register"], raw)
+            self.assertEqual(assessment["sources"], self.records)
+            self.assertEqual([r["outcome"] for r in assessment["outcomes"]], ["review_required", "hard_block", "hard_block"])
+            checklist = (directory / ed.CHECKLIST).read_text()
+            for item in raw["items"]:
+                self.assertIn(item["id"], checklist)
+                self.assertIn(item["task"], checklist)
+            self.assertIn("action_support_review", checklist)
+            for name in ("meeting-notes-draft.md", "action-items.md", "minutes-draft.md", "summary.md"):
+                self.assertTrue((directory / name).exists())
+            with self.assertRaises(ValueError):
+                publication_payload(directory)
 
     def test_lesson_and_existing_output_destinations_reject_editorial_mode_before_calls(self):
         with tempfile.TemporaryDirectory() as tmp:

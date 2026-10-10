@@ -17,6 +17,11 @@ Oversized omitted lines are explicit evidence gaps, never verified support.
 The compact register includes local candidate references, not its full private
 provenance; source IDs alone do not certify factual accuracy. Keep recap
 references only in previous_context, current-business/adjournment elsewhere.
+Register entries are unapproved candidates, including when action guards pass.
+Blocked, private or conflicted actions may be absent from the projection. That
+does not remove their underlying workplace issues: use the source excerpts and
+map summaries for qualified, non-identifying issue discussion. Do not turn an
+omitted action into an assignment or a confirmed outcome in the notes prose.
 concerns is an array drawn from source_conflict, uncertain_identity,
 confidentiality, policy_sensitive, incomplete_coverage. Report material concerns.
 
