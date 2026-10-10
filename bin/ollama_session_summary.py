@@ -39,6 +39,8 @@ def call_ollama(
     usage_callback=None,
     num_predict: int | None = None,
     response_format: str | None = None,
+    response_callback=None,
+    thinking: bool | None = None,
 ) -> str:
     options = {
         "temperature": temperature,
@@ -59,6 +61,8 @@ def call_ollama(
     }
     if response_format is not None:
         payload["format"] = response_format
+    if thinking is not None:
+        payload["think"] = thinking
 
     req = urllib.request.Request(
         url=ollama_url.rstrip("/") + "/api/generate",
@@ -68,10 +72,26 @@ def call_ollama(
     )
 
     began = time.monotonic()
-    data = managed_generate(ollama_url, payload, 3600)
-    if data is None:
-        with urllib.request.urlopen(req, timeout=3600) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+    try:
+        data = managed_generate(ollama_url, payload, 3600)
+        if data is None:
+            with urllib.request.urlopen(req, timeout=3600) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        if response_callback is None:
+            raise
+        from meeting_postprocess.ollama_response import GenerationFailure, metadata
+        failure = "ollama_invalid_response" if isinstance(exc, json.JSONDecodeError) else "ollama_transport_failure"
+        response_callback({**metadata(None, num_predict, thinking), "failure_category": failure})
+        raise GenerationFailure(failure) from None
+
+    if response_callback is not None:
+        from meeting_postprocess.ollama_response import GenerationFailure, metadata, classify
+        info = metadata(data, num_predict, thinking)
+        failure = classify(data, info)
+        response_callback({**info, "failure_category": failure})
+        if failure:
+            raise GenerationFailure(failure)
 
     if usage_callback is not None:
         usage_callback({"model": model, "num_ctx": num_ctx, "prompt_eval_count": data.get("prompt_eval_count") if type(data.get("prompt_eval_count")) is int else None,
@@ -277,6 +297,14 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--meeting-notes", action="store_true", help="Opt-in editorial meeting notes and private canonical register, using existing reduction calls")
     parser.add_argument("--meeting-notes-output-dir", type=Path, help="New isolated destination required for the editorial prototype")
     parser.add_argument("--meeting-notes-tokenizer", type=Path, help="Required matching local tokenizer.json for editorial reduction budgets (or MEETING_NOTES_TOKENIZER)")
+    parser.add_argument("--meeting-notes-thinking", choices=("default", "enabled", "disabled"), default="default", help="Explicit editorial reductions only; confirm installed Ollama/model JSON compatibility before changing the default")
+    parser.add_argument("--meeting-notes-checkpoint", type=Path, help="Explicit editorial-only continuation from a sealed completed-map checkpoint")
+    parser.add_argument("--meeting-notes-checkpoint-sha256", help="Operator-selected immutable checkpoint identity; required for continuation")
+    parser.add_argument("--meeting-notes-seal-maps", type=Path, help="Offline only: verify preserved legacy maps against source/config/code and completed runner evidence, then seal in a new directory")
+    parser.add_argument("--meeting-notes-source-stage", type=Path)
+    parser.add_argument("--meeting-notes-source-stage-sha256")
+    parser.add_argument("--meeting-notes-source-commit")
+    parser.add_argument("--meeting-notes-source-config-sha256")
 
     parser.add_argument("--synthesis-mode", choices=("map-reduce", "whole"), default="map-reduce", help="Meeting only: opt-in whole-meeting experiment; map/reduce remains default")
     parser.add_argument("--synthesis-num-ctx", type=int, help="Independent whole-meeting context (default 98304 or MEETING_SYNTHESIS_NUM_CTX)")
@@ -291,6 +319,15 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--synthesis-retain-response", action="store_true", help="Explicitly retain a private source-bound evidence response for offline debugging")
 
     args = _args if _args is not None else parser.parse_args()
+    checkpoint = getattr(args, "meeting_notes_checkpoint", None)
+    seal_maps = getattr(args, "meeting_notes_seal_maps", None)
+    if checkpoint or seal_maps or getattr(args, "meeting_notes_checkpoint_sha256", None):
+        if not args.meeting_notes or checkpoint and seal_maps or args.suggest_speakers or args.suggest_speakers_llm:
+            parser.error("Checkpoint modes require editorial-only map/reduce without speaker inference")
+        if checkpoint and not args.meeting_notes_checkpoint_sha256:
+            parser.error("Continuation requires an explicit checkpoint SHA256")
+        if seal_maps and not all(getattr(args, key, None) for key in ("meeting_notes_source_stage", "meeting_notes_source_stage_sha256", "meeting_notes_source_commit", "meeting_notes_source_config_sha256")):
+            parser.error("Legacy sealing requires independently verified stage, code and original configuration identities")
     if args.meeting_notes or args.meeting_notes_output_dir or args.meeting_notes_tokenizer:
         if args.profile != "meeting" or args.synthesis_mode != "map-reduce" or not args.meeting_notes or not args.meeting_notes_output_dir:
             parser.error("Editorial notes require meeting map/reduce, --meeting-notes and --meeting-notes-output-dir")
@@ -301,6 +338,9 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         production = Path(os.environ.get("MEETING_SUMMARIES_ROOT", str(Path(__file__).resolve().parents[1] / "meeting-summaries"))).resolve()
         if target.exists() or target.is_relative_to(source) or source.is_relative_to(target) or target.is_relative_to(production) or production.is_relative_to(target):
             parser.error("Editorial destination must be new and outside source/production outputs")
+        origin = checkpoint.parent.resolve() if checkpoint else seal_maps.resolve() if seal_maps else None
+        if origin and (target.is_relative_to(origin) or origin.is_relative_to(target)):
+            parser.error("Checkpoint destination must be outside preserved checkpoint artifacts")
         _summary_dir = target
     synthesis_options = args.synthesis_retain_response or args.synthesis_validate_response is not None or args.synthesis_preflight or any(getattr(args, name) is not None for name in ("synthesis_num_ctx", "synthesis_model", "synthesis_tokenizer", "experiment_output_dir"))
     if args.profile != "meeting" and (args.synthesis_mode != "map-reduce" or synthesis_options):
@@ -357,6 +397,10 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         print(f"ERROR: Prompt directory not found: {prompt_dir}", file=sys.stderr)
         return 2
 
+    if args.meeting_notes:
+        from meeting_postprocess.editorial_checkpoint import StagePrompts
+        prompt_dir = StagePrompts(prompt_dir)
+
     chunk_system_path = prompt_dir / "chunk_system.txt"
     reduce_system_path = prompt_dir / "reduce_system.txt"
 
@@ -373,6 +417,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         from meeting_postprocess import editorial
         try:
             tokenizer = args.meeting_notes_tokenizer or os.environ.get("MEETING_NOTES_TOKENIZER")
+            if os.environ.get("AIHUB_GPU_STAGE_INPUT_SNAPSHOTS"):
+                _, tokenizer = approved_input("editorial_tokenizer", tokenizer)
             editorial_budget = editorial.RequestBudget(tokenizer, args.reduce_num_ctx, reduce_system)
         except editorial.EditorialFailure as exc:
             print(f"[editorial] preflight unavailable: {exc}; no inference authorized", file=sys.stderr)
@@ -384,7 +430,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         return 2
 
     try:
-        chunks = load_jsonl(chunks_jsonl)
+        _, selected_chunks_jsonl = approved_input("transcript_index", chunks_jsonl) if checkpoint else (False, chunks_jsonl)
+        chunks = load_jsonl(selected_chunks_jsonl)
     except Exception as exc:
         print(f"ERROR: Failed to read chunk JSONL: {chunks_jsonl}: {exc}", file=sys.stderr)
         return 2
@@ -544,6 +591,48 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             return 2
 
     chunk_summaries: list[dict[str, Any]] = []
+    checkpoint_record = None
+    checkpoint_bindings = None
+    if args.meeting_notes:
+        from meeting_postprocess import editorial_checkpoint as checkpoint_api
+        checkpoint_bindings = {
+            "transcript_index": checkpoint_api.selected_binding("transcript_index", chunks_jsonl, selected_chunks_jsonl),
+            "approved_aliases": checkpoint_api.selected_binding("approved_aliases", args.speaker_aliases or transcript_dir / "speaker_aliases.json", alias_path if alias_bound else (alias_path or transcript_dir / "speaker_aliases.json")),
+            "approved_turn_corrections": checkpoint_api.selected_binding("approved_turn_corrections", transcript_dir / CORRECTIONS_FILE, correction_path),
+            "meeting_configuration": checkpoint_api.file_binding(os.environ.get("AIHUB_GPU_STAGE_SETTINGS_FILE") or os.environ.get("MEETING_CONFIG_FILE")),
+            "chunk_plan": checkpoint_api.file_binding(args.chunk_plan),
+            "chunk_tokenizer": checkpoint_api.file_binding(args.chunk_tokenizer),
+        }
+        if checkpoint:
+            try:
+                checkpoint_record, chunk_summaries = checkpoint_api.load(checkpoint, args.meeting_notes_checkpoint_sha256, args, sys.modules[__name__], tokenizer, chunks, checkpoint_bindings)
+                checkpoint_api.require_fresh_stage(checkpoint_record, args.meeting_notes_checkpoint_sha256)
+                if (checkpoint_record["aliases"] != aliases or checkpoint_record["approved_passages"] != json.loads(json.dumps(approved_passages)) or
+                        checkpoint_record["blocked_context_source_ids"] != sorted(commitment_context_blocked) or checkpoint_record["chunk_plan"] != chunk_plan):
+                    raise editorial.EditorialFailure("checkpoint_preparation_state_changed")
+            except Exception as exc:
+                category = str(exc) if isinstance(exc, editorial.EditorialFailure) else "checkpoint_validation_failed"
+                write_private_json(summaries_dir / editorial.REVIEW, {"status": "review_hold", "phase": "checkpoint_failed", "failure_category": category})
+                print(f"[editorial] {category}; no model calls made", file=sys.stderr)
+                return 2
+            with chunk_summaries_path.open("x", encoding="utf-8") as stream:
+                stream.write("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in chunk_summaries))
+            write_private_json(summaries_dir / checkpoint_api.FILE, checkpoint_record)
+        if seal_maps:
+            try:
+                chunk_summaries, old_stage = checkpoint_api.verify_legacy(seal_maps, args, sys.modules[__name__], chunks, map_chunks, checkpoint_bindings, prompt_dir, chunk_plan)
+                with chunk_summaries_path.open("x", encoding="utf-8") as stream:
+                    stream.write("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in chunk_summaries))
+                checkpoint_api.seal(summaries_dir, args, sys.modules[__name__], chunks, map_chunks, chunk_summaries, checkpoint_bindings, aliases, approved_passages, commitment_context_blocked, redaction_warnings, tokenizer, prompt_dir, chunk_plan, stage_id=old_stage,
+                                    origin={"mode": "operator_invoked_legacy_seal", "source_commit": args.meeting_notes_source_commit,
+                                            "source_stage_sha256": args.meeting_notes_source_stage_sha256, "source_configuration_sha256": args.meeting_notes_source_config_sha256})
+                print("[editorial] completed maps sealed for explicit review; no inference", flush=True)
+                return 0
+            except Exception as exc:
+                category = str(exc) if isinstance(exc, editorial.EditorialFailure) else "checkpoint_sealing_failed"
+                write_private_json(summaries_dir / editorial.REVIEW, {"status": "review_hold", "phase": "checkpoint_failed", "failure_category": category})
+                print(f"[editorial] {category}; no model calls made", file=sys.stderr)
+                return 2
     current_source = "\n".join(
         chunk["text"] for chunk in chunks
         if chunk.get("meeting_section") in {BUSINESS, ADJOURNMENT}
@@ -552,7 +641,7 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     commitments = commitment_evidence(chunks, include_context=True, blocked_context_source_ids=commitment_context_blocked) if profile == "meeting" else []
     source_context = source_context_evidence(chunks, commitment_context_blocked) if profile == "meeting" else []
 
-    for idx, chunk in enumerate(map_chunks, start=1):
+    for idx, chunk in enumerate([] if checkpoint else map_chunks, start=1):
         chunk_id = chunk.get("chunk_id", f"chunk-{idx:03d}")
         print(f"[map] {idx}/{len(map_chunks)} summarizing {chunk_id}", flush=True)
 
@@ -605,6 +694,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     print(f"[info] wrote {chunk_summaries_path}", flush=True)
 
     combined = build_reduce_input(chunk_summaries)
+    if args.meeting_notes and not checkpoint:
+        checkpoint_api.seal(summaries_dir, args, sys.modules[__name__], chunks, map_chunks, chunk_summaries, checkpoint_bindings, aliases, approved_passages, commitment_context_blocked, redaction_warnings, tokenizer, prompt_dir, chunk_plan)
     current_meeting_combined = combined
     recap_combined = ""
     document_findings = []
@@ -621,12 +712,14 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
 
     if profile == "meeting" and args.meeting_notes:
         from meeting_postprocess import editorial
-        def generate_editorial(prompt, *, structured=False, num_predict):
+        def generate_editorial(prompt, *, structured=False, num_predict, response_callback=None):
             return call_ollama(
                 ollama_url=args.ollama_url, model=args.reduce_model, prompt=prompt,
                 system=(reduce_system + "\nReturn only the requested JSON; no Markdown wrapper." if structured else reduce_system),
                 keep_alive=args.keep_alive, temperature=args.temperature, num_ctx=args.reduce_num_ctx,
                 num_predict=num_predict,
+                response_callback=response_callback,
+                thinking={"default": None, "enabled": True, "disabled": False}[getattr(args, "meeting_notes_thinking", "default")],
                 **({"response_format": "json"} if structured else {}),
                 **({"usage_callback": _usage_callback} if _usage_callback is not None else {}),
             )

@@ -30,6 +30,7 @@ CHECKLIST = "operator-review.private.md"
 RESPONSE = "editorial-response.private.json"
 NOTES_EVIDENCE = "notes-evidence.private.json"
 BUDGETS = "editorial-budgets.private.json"
+DIAGNOSTICS = "editorial-generation.private.json"
 FRAMING = 1024
 OUTPUT_TOKENS = {"register": 16384, "notes": 8192, "detailed": 16384, "recap": 8192}
 LOCAL_LINES = 3
@@ -783,29 +784,51 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
     write_private_json(directory / REVIEW, {"status": "review_hold", "phase": "incomplete"})
     records = source_records(chunks)
     source = "\n".join(c["text"] for c in chunks if c["meeting_section"] in {BUSINESS, ADJOURNMENT})
-    raw, assessment = {}, None
+    raw, assessment, diagnostics = {}, None, []
+    phase = "register"
     def request(stage, prompt, structured=False):
         measured = budget.measure(stage, prompt, structured)
         write_private_json(directory / BUDGETS, {"requests": budget.measurements})
         if not measured["fits"]:
             raise EditorialFailure("editorial_" + stage + "_context_exceeded")
-        return generate(prompt, structured=structured, num_predict=measured["reserved_output"])
+        def record_response(info):
+            diagnostics.append({"stage": stage, **info})
+            write_private_json(directory / DIAGNOSTICS, {"requests": diagnostics})
+        # CPU fixtures may supply the legacy callable; the production adapter
+        # explicitly accepts the response callback. No backend retry is made.
+        import inspect
+        parameters = inspect.signature(generate).parameters
+        kwargs = {"response_callback": record_response} if "response_callback" in parameters else {}
+        answer = generate(prompt, structured=structured, num_predict=measured["reserved_output"], **kwargs)
+        if not isinstance(answer, str) or not answer.strip():
+            raise EditorialFailure("ollama_empty_final_answer")
+        return answer
     try:
         raw["register"] = request("register", register_prompt(prompts, records, current, commitments, context), True)
-        proposed = json.loads(raw["register"])
+        try:
+            proposed = json.loads(raw["register"])
+        except json.JSONDecodeError:
+            raise EditorialFailure("editorial_register_invalid_json") from None
         supplied = {r["id"] for r in register_input(records, commitments, context) if len(r["text"]) <= LOCAL_CHARS}
         assessment = audit_register(proposed, records, commitments, source, supplied=supplied)
         write_private_json(directory / RESPONSE, {"source_hash": digest(records), "responses": raw, "register_assessment": assessment})
         register = triage_register(assessment, records, commitments, source)
         write_private_json(directory / REGISTER, register)
+        phase = "notes"
         raw["notes"] = request("notes", notes_prompt(prompts, records, combined, register), True)
         visible = {key: row for key, row in records.items() if len(row["text"]) <= LOCAL_CHARS}
-        notes = validate_notes(json.loads(raw["notes"]), visible, source)
+        try:
+            proposed_notes = json.loads(raw["notes"])
+        except json.JSONDecodeError:
+            raise EditorialFailure("editorial_notes_invalid_json") from None
+        notes = validate_notes(proposed_notes, visible, source)
         for key in records.keys() - visible.keys():
             register["findings"].append({"code": "source_excerpt_coverage_review", "source_id": key})
+        phase = "detailed"
         raw["detailed"] = request("detailed", detailed_prompt(prompts, records, current, register))
         detailed = raw["detailed"]
         if keep_recap and recap:
+            phase = "recap"
             raw["recap"] = request("recap", (prompts / "recap_prompt.txt").read_text(encoding="utf-8").replace("{chunk_summaries}", recap))
             historical = raw["recap"]
             detailed = insert_recap(detailed, historical)
@@ -817,10 +840,12 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
         print(f"[editorial] review hold; {review['notes_word_count']} words; {len(review['findings'])} finding(s)", flush=True)
         return 0
     except Exception as exc:
-        category = str(exc) if isinstance(exc, EditorialFailure) else "invalid_json_or_generation_failure"
+        from .ollama_response import GenerationFailure
+        category = str(exc) if isinstance(exc, (EditorialFailure, GenerationFailure)) else "editorial_internal_failure"
         # Responses contain private source data. Never print exception/model text.
         write_private_json(directory / RESPONSE, {"source_hash": digest(records), "responses": raw, "register_assessment": assessment})
         write_private_json(directory / REVIEW, {"status": "review_hold", "phase": "failed", "failure_category": category,
+                                               "failed_stage": phase,
                                                "register_outcomes": assessment["outcomes"] if assessment else []})
         if assessment and not (directory / CHECKLIST).exists():
             private_text(directory / CHECKLIST, register_review_checklist(assessment))

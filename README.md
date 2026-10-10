@@ -1309,6 +1309,44 @@ release/upload is implemented. The existing public filename allowlist is unchang
 Detailed source records and minutes remain available internally; a new title alone
 does not authorize circulation of official minutes or sensitive casework.
 
+Each editorial reduction writes allowlisted counts and stop metadata to
+`editorial-generation.private.json`: final-answer characters, thinking characters
+when returned, stop reason, evaluated/prompt tokens, output limit and requested
+thinking mode. Reasoning content, backend error text and prompts are never saved
+in this diagnostic record. Empty answers, thinking-only answers, exhausted
+generation limits, transport failures and malformed final JSON have separate
+failure codes; source/schema violations retain their existing validation codes.
+`--meeting-notes-thinking default|enabled|disabled` affects editorial reductions
+only and defaults to the existing model behavior. Confirm the installed Ollama
+version/model's JSON compatibility before selecting a different mode. It does
+not increase output/context limits or change mapping.
+
+Completed editorial maps are sealed in `editorial-map-checkpoint.private.json`
+before the register reduction. Explicit continuation uses the existing historical
+launcher with `--meeting-notes-checkpoint FILE` and
+`--meeting-notes-checkpoint-sha256 OPERATOR_REVIEWED_SHA256`, plus the same source,
+model/context/configuration options and a new `--meeting-notes-output-dir`.
+The new coordinated stage snapshots maps, prepared sections, original inputs,
+speaker approvals, prompts and tokenizer, and binds the executing code/config.
+It verifies complete source coverage, map/source/request hashes, relevant map
+code, original stage completion/cleanup, the selected runner target and a fresh
+owned stage before performing the normal editorial reductions. It reuses no
+register/notes response and has no retry, recovery or scheduling mechanism.
+
+Older map outputs without a checkpoint require a separate **offline** sealing
+invocation of `ollama_meeting_summary.py`: `--meeting-notes-seal-maps OLD_DIR`,
+`--meeting-notes-source-stage ORIGINAL_STAGE_RECORD`, its
+`--meeting-notes-source-stage-sha256`, the independently known original Git
+`--meeting-notes-source-commit`, and original configuration's independently
+verified `--meeting-notes-source-config-sha256`. Use the original source/approved
+inputs and settings and a new output directory. Sealing regenerates preparation
+without inference and compares exact source/redactions, original approved-input
+bindings, map requests and map-relevant code. Missing authority, uncertain backend
+work or changed inputs blocks sealing/continuation. A hash calculated from an
+unverified current configuration is not evidence of the original configuration.
+All source artifacts are preserved; sealed outputs and continued drafts retain
+the publication/export hold.
+
 Offline regression (mocked models only):
 
 ```bash
