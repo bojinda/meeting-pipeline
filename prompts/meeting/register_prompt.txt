@@ -43,4 +43,5 @@ significant hazards and issues in generalized form in the notes reduction.
 Set concerns to zero or more of: source_conflict, uncertain_identity,
 confidentiality, policy_sensitive, incomplete_coverage. These require review.
 Do not conceal a material issue to meet a size target or falsely mark completion.
-Only undertaking items selected as member_facing enter the public table.
+All register proposals remain unapproved private review records; member_facing
+is not operator approval. Do not present them as confirmed assignments in notes.
