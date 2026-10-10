@@ -11,6 +11,7 @@ from .speaker_suggestions import _plain_name, speaker_input, write_private_json
 
 CORRECTIONS_FILE = "speaker_turn_corrections.json"
 TURNS_FILE = "speaker-turns.json"
+INSPECTION_FILE = "speaker-turns.private.txt"
 CONFLICTS_FILE = "speaker-turn-conflicts.json"
 TURN = re.compile(r"^\[([^\]\n]+)\]:?[ \t]*(.*)$")
 

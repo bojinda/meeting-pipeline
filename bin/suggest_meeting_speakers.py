@@ -11,7 +11,7 @@ from meeting_postprocess.aliases import load_aliases
 from meeting_postprocess.normalization import SPEAKER_LABEL
 from meeting_postprocess.speaker_review import reground_review, review_speakers
 from meeting_postprocess.speaker_turn_review import review_turns, settings, source_events
-from meeting_postprocess.speaker_turns import turn_catalog, correction_document, correction_conflicts, effective_turns, approve_turn, remove_turn, read_index, TURNS_FILE, CONFLICTS_FILE
+from meeting_postprocess.speaker_turns import turn_catalog, correction_document, correction_conflicts, effective_turns, approve_turn, remove_turn, read_index, TURNS_FILE, CONFLICTS_FILE, INSPECTION_FILE
 from ollama_session_summary import resolve_model_defaults
 from meeting_postprocess.speaker_suggestions import (
     PRIVATE_SUGGESTIONS_FILENAME, _plain_name, build_speaker_suggestions,
@@ -42,6 +42,11 @@ def main() -> int:
     approve.add_argument("--speaker-aliases", type=Path)
     approve.add_argument("--speaker-roster", type=Path, help="Use the same private roster as the reviewed suggestions")
     approve.add_argument("--approve", action="append", required=True, metavar="SPEAKER_XX")
+    alias = commands.add_parser("set-alias", help="Record an operator-confirmed name for one label in this meeting; no model guesses")
+    alias.add_argument("transcript_dir", type=Path)
+    alias.add_argument("--speaker-aliases", type=Path)
+    alias.add_argument("--speaker-label", required=True, metavar="SPEAKER_XX")
+    alias.add_argument("--name", required=True, help="Use only when this label consistently represents the known person; otherwise approve-turn")
     for name in ("inspect-turns", "approve-turn", "remove-turn", "turn-conflicts"):
         action = commands.add_parser(name, help="Private source-turn inspection/correction; never runs WhisperX or models")
         action.add_argument("transcript_dir", type=Path)
@@ -58,7 +63,14 @@ def main() -> int:
         approved = load_aliases(transcript, args.speaker_aliases)
         root = Path(os.environ.get("MEETING_SUMMARIES_ROOT", str(Path(__file__).resolve().parents[1] / "meeting-summaries"))).expanduser()
         output_dir = root / transcript.name
-        if args.command in {"inspect-turns", "approve-turn", "remove-turn", "turn-conflicts"}:
+        if args.command == "set-alias":
+            catalog = turn_catalog(transcript)
+            if not SPEAKER_LABEL.fullmatch(args.speaker_label) or not any(row["source_speaker"] == args.speaker_label for row in catalog["turns"]):
+                raise ValueError("Selected speaker label is absent or fully redacted in this meeting")
+            updated = {**approved, args.speaker_label: _plain_name(args.name)}
+            write_private_json(args.speaker_aliases or transcript / "speaker_aliases.json", updated)
+            print("Recorded the operator-confirmed name for the selected meeting label. Generate notes after finishing speaker review.")
+        elif args.command in {"inspect-turns", "approve-turn", "remove-turn", "turn-conflicts"}:
             if args.command == "remove-turn":
                 remove_turn(transcript, args.turn_id)
                 print("Removed the explicitly selected private turn correction.")
@@ -88,6 +100,21 @@ def main() -> int:
                         raise ValueError("Requested source turn is absent or redacted")
                 payload, filename = {**catalog, "turns": rows, "conflicts": conflicts}, TURNS_FILE
             write_private_json(output_dir / filename, payload)
+            if args.command == "inspect-turns":
+                inspection = output_dir / INSPECTION_FILE
+                if inspection.is_symlink():
+                    raise OSError("Private speaker output cannot be a symbolic link")
+                lines = ["PRIVATE SPEAKER REVIEW — this meeting only", "",
+                         "Leave unknown speakers unchanged. Use set-alias only for a consistently identified label; use approve-turn for a specific passage.", ""]
+                if any(row["blocking"] for row in conflicts):
+                    lines += ["Existing corrections are stale or invalid; the identities below are original source labels.", ""]
+                for row in rows:
+                    lines += [f"Turn: {row['turn_id']} | Source label: {row['source_speaker']} | Current name: {row.get('effective_speaker', row['source_speaker'])}",
+                              f"Time: {row['start_time']}–{row['end_time']} ({row['time_precision']})", row["text"], ""]
+                with os.fdopen(os.open(inspection, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), "w", encoding="utf-8") as stream:
+                    stream.write("\n".join(lines) + "\n")
+                os.chmod(inspection, 0o600)
+                print(f"Readable private turn list: {inspection}; unknown speakers can be left unchanged.")
             print(f"Wrote private {filename}; inspect locally.")
         elif args.command == "suggest":
             output_dir = args.output_dir or output_dir
@@ -129,9 +156,9 @@ def main() -> int:
                 row = records.get(label)
                 selected = displayed.get(label)
                 if not selected or not selected.get("suggested_name") or selected.get("confidence") not in {"high", "medium"} or selected.get("ambiguity"):
-                    raise ValueError("Selected review remains unresolved or low confidence; verify aliases manually")
+                    raise ValueError("Selected review remains unresolved or low confidence; use set-alias or approve-turn after identifying the speaker")
                 if not SPEAKER_LABEL.fullmatch(label) or not row or not row.get("suggested_name") or not row.get("evidence") or row.get("confidence") not in {"high", "medium"} or row.get("ambiguity") or len(row.get("candidates", [])) != 1:
-                    raise ValueError("Selected label has no unambiguous, evidenced suggestion; edit aliases manually after review")
+                    raise ValueError("Selected label has no unambiguous, evidenced suggestion; use set-alias or approve-turn after identifying the speaker")
                 if row["suggested_name"] != selected["suggested_name"]:
                     raise ValueError("Displayed identity does not match current grounded review")
                 name = _plain_name(row["suggested_name"])

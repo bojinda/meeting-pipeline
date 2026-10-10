@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 INPUT="$1"
 BASE_DIR="$HOME/meeting-pipeline"
@@ -114,14 +115,26 @@ if AIHUB_GPU_STAGE_INPUT="$INPUT" AIHUB_GPU_STAGE_SETTINGS_FILE="$CONFIG_FILE" a
   fi
 
   if [ -f "$OUTDIR/chunks_out/transcript_chunks.jsonl" ]; then
-    if AIHUB_GPU_STAGE_INPUT="$OUTDIR/chunks_out/transcript_chunks.jsonl" AIHUB_GPU_STAGE_SETTINGS_FILE="$CONFIG_FILE" aihub_run_gpu_stage gpu1 "Ollama meeting summaries (GPU1)" python "$BASE_DIR/bin/ollama_meeting_summary.py" "$OUTDIR" >> "$LOGFILE" 2>&1; then
-      echo "Summaries: yes" >> "$STATUSFILE"
-      echo "Summary dir: ${MEETING_SUMMARIES_ROOT:-$BASE_DIR/meeting-summaries}/$(basename "$OUTDIR")" >> "$STATUSFILE"
-    else
-      echo "Summaries: failed" >> "$STATUSFILE"
+    NOTES_OPTIONS=(--meeting-notes)
+    if [ -n "${MEETING_NOTES_DUAL_GPU_TARGET:-meeting-dual}" ]; then
+      NOTES_OPTIONS+=(--dual-gpu-target "${MEETING_NOTES_DUAL_GPU_TARGET:-meeting-dual}")
     fi
+    if MEETING_CONFIG_FILE="$CONFIG_FILE" bash "$BASE_DIR/bin/summarize-existing-meeting.sh" "$OUTDIR" "${NOTES_OPTIONS[@]}" >> "$LOGFILE" 2>&1; then
+      SUMMARY_STATUS=0
+    else
+      SUMMARY_STATUS=$?
+    fi
+    DRAFT_STATUS="$(grep -E '^\[editorial\] (Draft ready|No usable draft)' "$LOGFILE" | tail -n 1 || true)"
+    if [ -n "$DRAFT_STATUS" ]; then
+      printf '%s\n' "$DRAFT_STATUS" >> "$STATUSFILE"
+    else
+      echo "No usable draft; see $LOGFILE" >> "$STATUSFILE"
+    fi
+    echo "Summary runner exit status: $SUMMARY_STATUS" >> "$STATUSFILE"
+    if [ "$SUMMARY_STATUS" != 0 ]; then exit "$SUMMARY_STATUS"; fi
   else
-    echo "Summaries: no chunks found" >> "$STATUSFILE"
+    echo "No usable draft: no transcript chunks found" >> "$STATUSFILE"
+    exit 1
   fi
 
 else

@@ -295,6 +295,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--chunk-tokenizer", type=Path, help="Matching local tokenizer used to validate the private chunk plan")
 
     parser.add_argument("--meeting-notes", action="store_true", help="Opt-in editorial meeting notes and private canonical register, using existing reduction calls")
+    parser.add_argument("--meeting-notes-only", action=argparse.BooleanOptionalAction, default=False,
+                        help="Stop after the held notes draft; skip separate detailed-minutes and recap generation")
     parser.add_argument("--meeting-notes-output-dir", type=Path, help="New isolated destination required for the editorial prototype")
     parser.add_argument("--meeting-notes-tokenizer", type=Path, help="Required matching local tokenizer.json for editorial reduction budgets (or MEETING_NOTES_TOKENIZER)")
     parser.add_argument("--meeting-notes-thinking", choices=("default", "enabled", "disabled"), default="default", help="Explicit editorial reductions only; confirm installed Ollama/model JSON compatibility before changing the default")
@@ -319,6 +321,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--synthesis-retain-response", action="store_true", help="Explicitly retain a private source-bound evidence response for offline debugging")
 
     args = _args if _args is not None else parser.parse_args()
+    if getattr(args, "meeting_notes_only", False) and not args.meeting_notes:
+        parser.error("--meeting-notes-only requires --meeting-notes")
     checkpoint = getattr(args, "meeting_notes_checkpoint", None)
     seal_maps = getattr(args, "meeting_notes_seal_maps", None)
     if checkpoint or seal_maps or getattr(args, "meeting_notes_checkpoint_sha256", None):
@@ -421,7 +425,7 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
                 _, tokenizer = approved_input("editorial_tokenizer", tokenizer)
             editorial_budget = editorial.RequestBudget(tokenizer, args.reduce_num_ctx, reduce_system)
         except editorial.EditorialFailure as exc:
-            print(f"[editorial] preflight unavailable: {exc}; no inference authorized", file=sys.stderr)
+            print(f"[editorial] No usable draft; preflight unavailable: {exc}; no model request made", file=sys.stderr)
             return 2
 
     chunks_jsonl = transcript_dir / "chunks_out" / "transcript_chunks.jsonl"
@@ -525,7 +529,7 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             write_report(summaries_dir, redaction_warnings)
             print("[done] all meeting content withheld; no Ollama calls made", flush=True)
             return 0
-        if args.keep_recap and any(chunk["meeting_section"] == RECAP for chunk in chunks):
+        if args.keep_recap and not getattr(args, "meeting_notes_only", False) and any(chunk["meeting_section"] == RECAP for chunk in chunks):
             if not (prompt_dir / "recap_prompt.txt").exists():
                 print(f"ERROR: Missing reduce prompt: {prompt_dir / 'recap_prompt.txt'}", file=sys.stderr)
                 return 2
@@ -662,7 +666,10 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
                 **({"usage_callback": _usage_callback} if _usage_callback is not None else {}),
             )
         except Exception as exc:
-            print(f"ERROR: Ollama map-stage failed for {chunk_id}: {exc}", file=sys.stderr)
+            if args.meeting_notes:
+                print(f"[editorial] No usable draft; map generation failed for {chunk_id}", file=sys.stderr)
+            else:
+                print(f"ERROR: Ollama map-stage failed for {chunk_id}: {exc}", file=sys.stderr)
             return 1
 
         if profile == "meeting":
@@ -725,7 +732,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             )
         status = editorial.run(summaries_dir, chunks, combined, current_meeting_combined, recap_combined,
                                commitments, source_context, aliases, approved_passages, redaction_warnings,
-                               prompt_dir, generate_editorial, args.keep_recap, budget=editorial_budget)
+                               prompt_dir, generate_editorial, args.keep_recap, budget=editorial_budget,
+                               notes_only=getattr(args, "meeting_notes_only", False))
         if status:
             return status
 

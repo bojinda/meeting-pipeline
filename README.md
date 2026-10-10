@@ -357,6 +357,31 @@ Suggested controls:
 
 This works well for both meetings and lesson capture, especially when manual control is sufficient.
 
+Meeting notes also run unattended. The existing recording script updates
+`meeting-recordings/last_recording.txt`; the active `meeting-postprocess.path`
+starts `meeting-postprocess.service`, which calls `postprocess-meeting.sh`.
+WhisperX and chunking run first. The summary step then calls the existing
+`summarize-existing-meeting.sh --meeting-notes` under the shared runner, without
+speaker selection, prompts for approval or a publishing action.
+
+The completed private draft is saved at
+`ignore/meeting-notes/<meeting>.XXXXXX/notes/meeting-notes-draft.md` (or under
+`MEETING_NOTES_ROOT`). Its exact location and either **Draft ready**, **Draft ready
+with review warnings**, or **No usable draft** appear in that transcript's
+`status.txt` and private `whisperx.log`. A new run preserves earlier drafts.
+Names and editorial corrections can be reviewed afterward in the Markdown file.
+The existing speaker commands record choices for subsequent processing; they
+do not rewrite an already-generated draft. Anonymous paragraphs can cite several
+speakers, so those choices do not justify automatic name substitution. Leave
+ambiguous attribution anonymous and edit only identities you can establish.
+
+The existing `meeting-dual` target must be configured for unattended execution,
+including its existing matching `AIHUB_GPU_DUAL_APPROVAL` policy binding in the
+service environment/config. This is a one-time deployment prerequisite, not a
+per-meeting prompt; missing authority fails closed. No policy or automation is
+changed by the local implementation. See `config/.env.example` for the notes
+storage/tokenizer settings. Speaker approvals remain optional.
+
 ---
 
 ## Cooperative GPU Resources
@@ -441,10 +466,16 @@ The launcher sources the selected config (default `config/.env`). An explicitly
 supplied `MEETING_SUMMARIES_ROOT` wins over that file so comparison runs need not
 overwrite accepted output. Choose a fresh private destination and preserve existing
 outputs. Keep the configured normal models; no model upgrade is part of this work.
-Supported optional flags are `--keep-recap`, `--no-keep-recap`, and two-argument
+Supported switches are `--keep-recap`, `--no-keep-recap`, `--meeting-notes`,
+`--meeting-notes-only`, `--no-meeting-notes-only`.
+Options taking a value are `--dual-gpu-target`,
 `--speaker-aliases`, `--map-model`, `--reduce-model`, `--map-num-ctx`,
-`--reduce-num-ctx`, `--keep-alive`, `--temperature`, `--ollama-url`.
-Whole-meeting modes, speaker suggestions and other flags are rejected. Omit
+`--reduce-num-ctx`, `--keep-alive`, `--temperature`, `--ollama-url`,
+`--chunk-plan`, `--chunk-comparison-dir`, `--chunk-tokenizer`,
+`--meeting-notes-output-dir`, `--meeting-notes-tokenizer`, `--meeting-notes-thinking`,
+`--meeting-notes-checkpoint`, `--meeting-notes-checkpoint-sha256`.
+These are forwarded to the existing summarizer; the dual target selects runner
+ownership. Whole-meeting modes, speaker suggestions and unlisted flags are rejected. Omit
 `--speaker-aliases` unless an existing approved file is selected. Default approved
 files are the existing `speaker_aliases.json` and `speaker_turn_corrections.json`
 inside that transcript directory. Missing approvals remain unresolved.
@@ -548,8 +579,60 @@ use the Python standard library and require no additional packages.
 
 ### Speaker names
 
-Place `speaker_aliases.json` in the individual meeting's transcript directory,
-alongside `chunks_out/`. Use only identities you have verified:
+Unattended notes are generated before speaker review. Later, use the existing
+speaker CLI to inspect passages and record confirmed names; no speaker model or
+JSON editing is needed. These choices affect subsequent processing, not the
+already-saved notes; edit that draft manually where attribution is clear. From
+the repository on the processing host, inspect the completed meeting:
+
+```bash
+python bin/suggest_meeting_speakers.py inspect-turns meeting-transcripts/session-123
+```
+
+Open the printed `speaker-turns.private.txt` path. It contains redacted passages,
+source labels, current approved names, timestamps and turn IDs as readable text;
+the internal JSON catalog is still retained. Names are this meeting's choices.
+Leave unknown speakers unchanged, or skip speaker review entirely.
+
+For a label you know consistently represents one person, record your confirmed
+name directly (only the selected label is added/replaced):
+
+```bash
+python bin/suggest_meeting_speakers.py set-alias meeting-transcripts/session-123 --speaker-label SPEAKER_03 --name "Taylor Morgan"
+```
+
+If a label represents different people, use the turn ID beside the specific
+passage instead. This existing command overrides an alias for that turn only:
+
+```bash
+python bin/suggest_meeting_speakers.py approve-turn meeting-transcripts/session-123 --turn-id T... --name "Casey"
+```
+
+Repeat inspection to see your choices. No rerun is needed for manual edits to
+the saved draft. For an explicitly requested new draft from an existing
+transcript, the same coordinated wrapper is available; it is also the unattended
+pipeline's summary step:
+
+```bash
+bash bin/summarize-existing-meeting.sh meeting-transcripts/session-123 \
+  --meeting-notes --dual-gpu-target meeting-dual
+```
+
+The normal pipeline automatically reads per-meeting `speaker_aliases.json` and
+`speaker_turn_corrections.json`; the shared runner snapshots them before
+processing. Corrections and aliases reach the prepared source, map prompts,
+reduce prompts and notes. Unapproved suggestions are never imported. Unknowns
+retain internal anonymous labels and should be described anonymously in notes.
+Skipping review requires no option and no empty approval file. Inspect again if
+the transcript changes; exact-turn approvals remain bound to their source.
+
+There is no graphical meeting-speaker selector in this repository. The bundled
+Chrome extension controls lesson capture, and the controller exposes capture
+actions; neither provides a speaker naming interface. The CLI above is the
+available operator selection workflow.
+
+For compatibility, existing mapping files beside `chunks_out/` are still
+supported. Use only identities you have confirmed:
 
 ```json
 {
@@ -560,11 +643,9 @@ alongside `chunks_out/`. Use only identities you have verified:
 
 See `config/speaker_aliases.example.json` for a sample. The file is optional;
 unmapped labels remain available for review. Invalid mappings stop generation
-before any Ollama calls. After updating names, rerun the summarizer:
-
-```bash
-python bin/ollama_meeting_summary.py meeting-transcripts/session-123
-```
+before any Ollama calls. Updating names does not require regenerating an existing
+draft. For any explicitly requested subsequent generation, use the coordinated
+wrapper above; it will read the confirmed names automatically.
 
 To select another mapping file, pass `--speaker-aliases /path/to/names.json`.
 The mapping is a flat JSON object with plain, single-line names.
@@ -619,8 +700,9 @@ Operator workflow:
    two-pass reviews require the exact-turn approval workflow below. The helper
    rechecks current source relationships and model evidence. Editing
    JSON confidence/candidate/ambiguity fields cannot bypass that verification.
-   Low-confidence, ambiguous, or null suggestions require manual verification
-   and alias editing. Use the same `--speaker-roster` when reviewing/approving
+   Low-confidence, ambiguous, or null suggestions require your own identification;
+   use `set-alias` for a consistently identified label or `approve-turn` for a
+   specific passage. Use the same `--speaker-roster` when reviewing/approving
    with an explicitly selected roster.
 5. Rerun postprocessing using approved aliases:
    ```bash
@@ -1192,6 +1274,15 @@ length finding requests review instead of cutting substantive issues automatical
 Markdown headings and tables are rendered consistently by Python; model text is
 plain prose without decorative formatting or internal evidence citations.
 
+Editorial standard for future work: these are internal union meeting notes.
+Preserve the substance and tone of members' criticism of CN, opinions about
+company practices and union positions. Anonymized WSIB, discipline and grievance
+examples may retain meaningful details, including amounts. Do not automatically
+soften those positions, remove anonymized examples or add excessive legal
+qualifications in pursuit of impartial legal prose. Avoid unnecessary personal
+identification and correct demonstrable factual errors against source evidence.
+Distribution remains a separate operator decision.
+
 This remains opt-in until comparison review. A future authorized comparison can use:
 
 ```bash
@@ -1201,11 +1292,25 @@ bash bin/summarize-existing-meeting.sh /private/existing-transcript \
   --keep-recap
 ```
 
+The unattended postprocessing wrapper selects this notes mode automatically.
+The summary wrapper supplies a fresh private destination, the existing local
+Qwen3.5 tokenizer path (or `MEETING_NOTES_TOKENIZER`), and the established 196,608
+editorial context. Meeting-specific model settings remain authoritative, with
+Qwen3.8:27b defaults when absent; the notes allowance remains 24,576 and thinking
+uses the model's default-on behavior. Explicit CLI output/model/context/tokenizer
+and `--meeting-notes-thinking` overrides remain supported. No checkpoint or
+operator-supplied hash is required for an ordinary run.
+
 The destination must be new and outside transcript/production output directories.
 The existing GPU stage, selected models, context settings, maps, approved speaker
 corrections and redactions are reused. The three existing reductions become the
 private action register, member notes, and detailed minutes; optional recap still
-uses its existing reduction. There is no additional LLM extraction layer. An
+uses its existing reduction when requested. Ordinary wrapper notes runs stop
+after the private register and notes reductions; no detailed-minutes or separate
+recap generation is needed. Previous-meeting context still comes from the mapped
+source. Pass `--no-meeting-notes-only` explicitly to request the additional
+documents; `--keep-recap` controls the separate recap for that full-output mode.
+There is no additional LLM extraction layer. An
 existing validated chunk plan may be passed with `--chunk-plan` and its tokenizer;
 use the editorial destination instead of `--chunk-comparison-dir`.
 

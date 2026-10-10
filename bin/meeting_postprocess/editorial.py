@@ -833,7 +833,7 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
     return review
 
 
-def run(directory, chunks, combined, current, recap, commitments, context, aliases, approved, warnings, prompts, generate, keep_recap, *, budget):
+def run(directory, chunks, combined, current, recap, commitments, context, aliases, approved, warnings, prompts, generate, keep_recap, *, budget, notes_only=False):
     """Reuse action, summary and detailed-minutes reduction slots, in that order."""
     write_private_json(directory / REVIEW, {"status": "review_hold", "phase": "incomplete"})
     records = source_records(chunks)
@@ -884,7 +884,10 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
             register["findings"].append({"code": "source_excerpt_coverage_review", "source_id": key})
         write_private_json(directory / RESPONSE, {"source_hash": digest(records), "responses": raw, "register_assessment": assessment})
         review = finish(directory, register, notes, None, source, warnings, records=records)
-        print(f"[editorial] private draft saved on review hold: {directory / 'meeting-notes-draft.md'}", flush=True)
+        state = "Draft ready with review warnings" if review["findings"] else "Draft ready"
+        print(f"[editorial] {state}: {directory / 'meeting-notes-draft.md'}; private, review hold; {review['notes_word_count']} words", flush=True)
+        if notes_only:
+            return 0
         phase = "detailed"
         raw["detailed"] = request("detailed", detailed_prompt(prompts, records, current, register))
         detailed = raw["detailed"]
@@ -921,6 +924,6 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
                                                    "register_outcomes": assessment["outcomes"] if assessment else []})
         if assessment and not (directory / CHECKLIST).exists():
             private_text(directory / CHECKLIST, register_review_checklist(assessment))
-        state = "private notes draft retained on review hold" if review is not None else "no usable draft"
+        state = "Draft ready with review warnings; private, review hold" if review is not None else "No usable draft"
         print(f"[editorial] {state}; {phase} incomplete: {category}; no publication authorized", flush=True)
         return 1
