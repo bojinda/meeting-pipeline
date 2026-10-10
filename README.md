@@ -1242,10 +1242,18 @@ awaiting confirmation. No original proposal is approved, deleted or reclassified
 Per-action failures do not stop the existing notes and detailed-minutes reductions,
 even if no action candidates remain. Both still receive the established summaries
 and source evidence; excluding an action does not suppress its underlying issue.
-The actual notes response must pass the existing source-reference, confidentiality
-and structural checks before rendering. Invalid top-level register JSON/schema or
-failed notes validation still stops with private diagnostics. The same three
-reduction calls are used; there is no manually written notes fallback. Actual
+Usable notes are saved immediately as a private `meeting-notes-draft.md` on review
+hold, before detailed-minutes or optional recap generation. Existing source IDs
+are canonically ordered; previous/current section-label disagreements become
+explicit review findings with the original citations and source labels retained.
+Neither normalization nor draft availability certifies the claims. A broad
+possible-person/case wording match also requests confidentiality review rather
+than rejecting impersonal prose such as "Advice was given". Explicit sensitive
+content, unsafe prose, nonexistent/duplicate/nonmeeting references, malformed core
+JSON and absent final answers still stop draft creation with private diagnostics.
+A later detailed/recap failure preserves the notes and findings, records the
+failure and returns a nonzero run status. The same three reduction calls are used;
+there is no manually written notes fallback. Actual
 register, notes and detailed responses are retained in `editorial-response.private.json`.
 The source-linked private register and checklist retain every original outcome
 alongside explicit projection-exclusion reasons.
@@ -1255,7 +1263,7 @@ Editorial mode requires a matching local `tokenizer.json` via
 `tokenizers` package, and an explicitly configured reduce context. No tokenizer
 is downloaded. Every reduction counts its complete prompt/system text, disables
 saved tokenizer truncation/padding, reserves 1,024 framing tokens and output
-capacity (register/detailed: 16,384; notes/optional recap: 8,192), and refuses
+capacity (notes: 24,576; register/detailed: 16,384; optional recap: 8,192), and refuses
 over-budget requests before generation. The output reserve is also the request's
 generation limit. No prompt is silently truncated or GPU allocation changed.
 Measurements are retained in `editorial-budgets.private.json`.
@@ -1317,7 +1325,8 @@ in this diagnostic record. Empty answers, thinking-only answers, exhausted
 generation limits, transport failures and malformed final JSON have separate
 failure codes; source/schema violations retain their existing validation codes.
 `--meeting-notes-thinking default|enabled|disabled` affects editorial reductions
-only and defaults to the existing model behavior. Confirm the installed Ollama
+only and retains the model's default-on thinking; `disabled` remains a manual
+troubleshooting override. Confirm the installed Ollama
 version/model's JSON compatibility before selecting a different mode. It does
 not increase output/context limits or change mapping.
 

@@ -148,7 +148,7 @@ class RegisterTriageTests(unittest.TestCase):
             self.assertEqual(len(calls), 3)
             self.assertEqual([row["stage"] for row in budget.measurements], ["register", "notes", "detailed"])
             self.assertEqual([kwargs["structured"] for _, kwargs in calls], [True, True, False])
-            self.assertEqual([kwargs["num_predict"] for _, kwargs in calls], [16384, 8192, 16384])
+            self.assertEqual([kwargs["num_predict"] for _, kwargs in calls], [16384, 24576, 16384])
             renderer.assert_called_once()
             self.assertEqual(renderer.call_args.args[0]["issues"][0]["paragraphs"][0]["text"], MODEL_TEXT)
             self.assertIn(MODEL_TEXT, (directory / "meeting-notes-draft.md").read_text(encoding="utf-8"))

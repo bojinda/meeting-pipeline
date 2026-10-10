@@ -199,7 +199,7 @@ class EditorialTests(unittest.TestCase):
     def test_confidentiality_and_unsupported_decorations_fail_closed(self):
         for content in ("Contact morgan@example.invalid.", "Call 416-555-0100.",
                         "Taylor was diagnosed yesterday.", "Medical history discussed.",
-                        "Morgan received discipline.", "## Important Notes", "<script>bad</script>",
+                        "## Important Notes", "<script>bad</script>",
                         "SPEAKER_03 spoke.", "See 3:L1."):
             notes = copy.deepcopy(self.notes)
             notes["issues"][0]["paragraphs"][0]["text"] = content
@@ -210,13 +210,11 @@ class EditorialTests(unittest.TestCase):
         with self.assertRaisesRegex(ed.EditorialFailure, "confidential_action"):
             self.register(raw)
 
-    def test_duplicate_sections_unknown_blocks_and_recap_leaks_rejected(self):
-        for change in ("duplicate", "recap", "unknown", "extra"):
+    def test_duplicate_sections_unknown_blocks_and_extra_fields_rejected(self):
+        for change in ("duplicate", "unknown", "extra"):
             notes = copy.deepcopy(self.notes)
             if change == "duplicate":
                 notes["issues"].append(notes["issues"][0])
-            elif change == "recap":
-                notes["issues"][0]["paragraphs"][0]["source_ids"] = ["2:L1"]
             elif change == "unknown":
                 notes["motions"][0]["source_ids"] = ["invented"]
             else:
@@ -365,8 +363,12 @@ class EditorialTests(unittest.TestCase):
             reduced = [c for c in calls if "Transcript chunk:" not in c["prompt"]]
             self.assertEqual(len(reduced), 3)
             self.assertEqual([c.get("response_format") for c in reduced], ["json", "json", None])
-            self.assertEqual([c["num_predict"] for c in reduced], [16384, 8192, 16384])
-            self.assertTrue(all(r["fits"] for r in json.loads((output / ed.BUDGETS).read_text())["requests"]))
+            self.assertEqual([c["num_predict"] for c in reduced], [16384, 24576, 16384])
+            self.assertTrue(all(c["thinking"] is None for c in reduced))
+            budgets = json.loads((output / ed.BUDGETS).read_text())["requests"]
+            self.assertTrue(all(r["fits"] for r in budgets))
+            self.assertEqual([r["reserved_output"] for r in budgets], [16384, 24576, 16384])
+            self.assertEqual(budgets[1]["required_context"], budgets[1]["input_tokens"] + 24576 + 1024)
             table = ed.undertaking_table(json.loads((output / ed.REGISTER).read_text()))
             for name in ("meeting-notes-draft.md", "action-items.md", "minutes-draft.md"):
                 result = (output / name).read_text()
@@ -468,9 +470,15 @@ class EditorialTests(unittest.TestCase):
                                 ROOT / "prompts/meeting", generate, True, budget=budget)
                 self.assertEqual(result, 1)
                 self.assertEqual(generate.call_count, list(ed.OUTPUT_TOKENS).index(stage))
-                self.assertFalse((Path(tmp) / "meeting-notes-draft.md").exists())
+                self.assertEqual((Path(tmp) / "meeting-notes-draft.md").exists(), stage in {"detailed", "recap"})
                 report = json.loads((Path(tmp) / ed.REVIEW).read_text())
                 self.assertEqual(report["failure_category"], "editorial_" + stage + "_context_exceeded")
+                self.assertEqual(report["status"], "review_hold")
+                if stage in {"detailed", "recap"}:
+                    self.assertTrue(any(f["code"] == "supplementary_output_failed" for f in report["findings"]))
+                    self.assertTrue(report["register_outcomes"])
+                    with self.assertRaisesRegex(ValueError, "hold"):
+                        publication_payload(Path(tmp))
                 self.assertFalse(json.loads((Path(tmp) / ed.BUDGETS).read_text())["requests"][-1]["fits"])
 
     def test_review_groups_prioritize_public_owners_conflicts_and_confidentiality(self):

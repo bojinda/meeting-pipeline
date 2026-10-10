@@ -227,12 +227,11 @@ class EditorialStructureTests(unittest.TestCase):
         ed.validate_notes(self.notes, self.records, self.source, reference_changes=unchanged)
         self.assertEqual(unchanged, [])
 
-    def test_reordering_does_not_repair_invalid_or_wrong_context_references(self):
+    def test_reordering_does_not_repair_invalid_or_nonmeeting_references(self):
         records = copy.deepcopy(self.records)
         records["outside:L1"] = {**records["2:L2"], "id": "outside:L1", "section": PRE_MEETING}
         for historical, refs in ((False, ["3:L2", "missing"]), (False, ["3:L2", "2:L2", "2:L2"]),
-                                 (False, ["3:L2", "1:L1"]), (False, ["outside:L1", "2:L2"]),
-                                 (True, ["1:L2", "2:L2"]), (True, ["3:L1"])):
+                                 (False, ["outside:L1", "2:L2"]), (True, ["missing"])):
             notes = copy.deepcopy(self.notes)
             block = {"text": "A report was discussed.", "source_ids": refs}
             if historical:
@@ -246,6 +245,63 @@ class EditorialStructureTests(unittest.TestCase):
         # Register validation remains strict: normalization applies only to notes.
         with self.assertRaisesRegex(ed.EditorialFailure, "unordered_source_references"):
             ed._refs(["3:L2", "2:L2"], self.records)
+
+    def test_section_mismatches_save_held_draft_without_relabelling_evidence(self):
+        notes = copy.deepcopy(self.notes)
+        notes["previous_context"] = [{"text": "The report was discussed earlier.", "source_ids": ["2:L1"]}]
+        notes["issues"][0]["paragraphs"][0]["source_ids"] = ["2:L2", "1:L1"]
+        original_notes, original_records = copy.deepcopy(notes), copy.deepcopy(self.records)
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            result, _, replies, _ = self.run_responses(directory, notes)
+            self.assertEqual(result, 0)
+            review = json.loads((directory / ed.REVIEW).read_text())
+            flags = [f for f in review["findings"] if f["code"] == "notes_source_section_review"]
+            self.assertEqual([f["mismatched_source_ids"] for f in flags], [["2:L1"], ["1:L1"]])
+            self.assertTrue(all(f["validation_finding"] == "invalid_source_references" for f in flags))
+            self.assertEqual(flags[0]["recorded_sections"], {"2:L1": ed.BUSINESS})
+            self.assertEqual(flags[0]["expected_sections"], [ed.RECAP])
+            evidence = json.loads((directory / ed.NOTES_EVIDENCE).read_text())
+            self.assertEqual(evidence["sources"], original_records)
+            self.assertEqual(evidence["notes"]["issues"][0]["paragraphs"][0]["source_ids"], ["1:L1", "2:L2"])
+            self.assertEqual(json.loads((directory / ed.RESPONSE).read_text())["responses"]["notes"], replies[1])
+            doc = (directory / "meeting-notes-draft.md").read_text()
+            self.assertIn("DRAFT — REVIEW REQUIRED", doc)
+            self.assertIn("Source citations require review", doc)
+            self.assertIn(notes["previous_context"][0]["text"], doc)
+            self.assertIn("notes_source_section_review", (directory / ed.CHECKLIST).read_text())
+            self.assert_held(directory)
+        self.assertEqual(notes, original_notes)
+        self.assertEqual(self.records, original_records)
+
+    def test_possible_identifying_cases_require_private_confidentiality_review(self):
+        for text in ("Advice was given about the reporting process.", "Morgan received discipline."):
+            notes = copy.deepcopy(self.notes)
+            notes["issues"][0]["paragraphs"][0]["text"] = text
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                status, _, _, _ = self.run_responses(directory, notes)
+                self.assertEqual(status, 0)
+                review = json.loads((directory / ed.REVIEW).read_text())
+                flags = [f for f in review["findings"] if f["code"] == "confidentiality"]
+                self.assertEqual(flags[0]["notes_location"], "issues/0/paragraphs/0")
+                self.assertEqual(flags[0]["source_ids"], ["2:L2"])
+                self.assertIn(text, (directory / "meeting-notes-draft.md").read_text())
+                self.assert_held(directory)
+
+    def test_no_final_notes_answer_never_creates_a_document(self):
+        for answer in ("", "   "):
+            with self.subTest(answer=answer), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                replies = iter([json.dumps(self.raw), answer])
+                budget = ed.RequestBudget(self.tokenizer, 196608, "Synthetic offline system")
+                with contextlib.redirect_stdout(io.StringIO()):
+                    status = ed.run(directory, self.chunks, "maps", "current", "", self.commitments, [], {}, [], [],
+                                    ROOT / "prompts/meeting", lambda *a, **k: next(replies), False, budget=budget)
+                self.assertEqual(status, 1)
+                self.assertFalse((directory / "meeting-notes-draft.md").exists())
+                self.assertEqual(json.loads((directory / ed.REVIEW).read_text())["failure_category"], "ollama_empty_final_answer")
+                self.assert_held(directory)
 
     def test_production_preserves_raw_order_and_normalization_diagnostics(self):
         notes = copy.deepcopy(self.notes)
