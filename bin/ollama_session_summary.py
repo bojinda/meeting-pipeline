@@ -38,6 +38,7 @@ def call_ollama(
     num_ctx: int | None = None,
     usage_callback=None,
     num_predict: int | None = None,
+    response_format: str | None = None,
 ) -> str:
     options = {
         "temperature": temperature,
@@ -56,6 +57,8 @@ def call_ollama(
         "keep_alive": keep_alive,
         "options": options,
     }
+    if response_format is not None:
+        payload["format"] = response_format
 
     req = urllib.request.Request(
         url=ollama_url.rstrip("/") + "/api/generate",
@@ -79,6 +82,8 @@ def call_ollama(
         or type(data.get("eval_count")) is int and data["eval_count"] >= num_predict
     ):
         raise ValueError("experimental_map_generation_limit")
+    if response_format is not None and data.get("done_reason") in {"length", "max_tokens"}:
+        raise ValueError("editorial_generation_limit")
     return (data.get("response") or "").strip()
 
 
@@ -269,6 +274,10 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--chunk-comparison-dir", type=Path, help="New isolated map/reduce comparison destination")
     parser.add_argument("--chunk-tokenizer", type=Path, help="Matching local tokenizer used to validate the private chunk plan")
 
+    parser.add_argument("--meeting-notes", action="store_true", help="Opt-in editorial meeting notes and private canonical register, using existing reduction calls")
+    parser.add_argument("--meeting-notes-output-dir", type=Path, help="New isolated destination required for the editorial prototype")
+    parser.add_argument("--meeting-notes-tokenizer", type=Path, help="Required matching local tokenizer.json for editorial reduction budgets (or MEETING_NOTES_TOKENIZER)")
+
     parser.add_argument("--synthesis-mode", choices=("map-reduce", "whole"), default="map-reduce", help="Meeting only: opt-in whole-meeting experiment; map/reduce remains default")
     parser.add_argument("--synthesis-num-ctx", type=int, help="Independent whole-meeting context (default 98304 or MEETING_SYNTHESIS_NUM_CTX)")
     parser.add_argument("--synthesis-model", help="Whole-meeting model override (default MEETING_SYNTHESIS_MODEL or selected reduce model)")
@@ -282,6 +291,17 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--synthesis-retain-response", action="store_true", help="Explicitly retain a private source-bound evidence response for offline debugging")
 
     args = _args if _args is not None else parser.parse_args()
+    if args.meeting_notes or args.meeting_notes_output_dir or args.meeting_notes_tokenizer:
+        if args.profile != "meeting" or args.synthesis_mode != "map-reduce" or not args.meeting_notes or not args.meeting_notes_output_dir:
+            parser.error("Editorial notes require meeting map/reduce, --meeting-notes and --meeting-notes-output-dir")
+        if args.chunk_comparison_dir:
+            parser.error("Use one isolated comparison destination at a time")
+        source = args.transcript_dir.resolve()
+        target = args.meeting_notes_output_dir.resolve()
+        production = Path(os.environ.get("MEETING_SUMMARIES_ROOT", str(Path(__file__).resolve().parents[1] / "meeting-summaries"))).resolve()
+        if target.exists() or target.is_relative_to(source) or source.is_relative_to(target) or target.is_relative_to(production) or production.is_relative_to(target):
+            parser.error("Editorial destination must be new and outside source/production outputs")
+        _summary_dir = target
     synthesis_options = args.synthesis_retain_response or args.synthesis_validate_response is not None or args.synthesis_preflight or any(getattr(args, name) is not None for name in ("synthesis_num_ctx", "synthesis_model", "synthesis_tokenizer", "experiment_output_dir"))
     if args.profile != "meeting" and (args.synthesis_mode != "map-reduce" or synthesis_options):
         parser.error("Whole-meeting synthesis is available only in meeting mode")
@@ -308,10 +328,10 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         parser.error(str(exc))
 
     if args.chunk_plan or args.chunk_comparison_dir or args.chunk_tokenizer:
-        if args.profile != "meeting" or args.synthesis_mode != "map-reduce" or not args.chunk_plan or not args.chunk_comparison_dir:
+        if args.profile != "meeting" or args.synthesis_mode != "map-reduce" or not args.chunk_plan or not (args.chunk_comparison_dir or args.meeting_notes_output_dir):
             parser.error("Chunk experiments require meeting map/reduce, --chunk-plan and --chunk-comparison-dir")
         source = args.transcript_dir.resolve()
-        target = args.chunk_comparison_dir.resolve()
+        target = (args.chunk_comparison_dir or args.meeting_notes_output_dir).resolve()
         production = Path(os.environ.get("MEETING_SUMMARIES_ROOT", str(Path(__file__).resolve().parents[1] / "meeting-summaries"))).resolve()
         if target.exists() or target.is_relative_to(source) or source.is_relative_to(target) or target.is_relative_to(production) or production.is_relative_to(target):
             parser.error("Chunk comparison destination must be new and outside source/production outputs")
@@ -349,6 +369,14 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
 
     chunk_system = chunk_system_path.read_text(encoding="utf-8").strip()
     reduce_system = reduce_system_path.read_text(encoding="utf-8").strip()
+    if args.meeting_notes:
+        from meeting_postprocess import editorial
+        try:
+            tokenizer = args.meeting_notes_tokenizer or os.environ.get("MEETING_NOTES_TOKENIZER")
+            editorial_budget = editorial.RequestBudget(tokenizer, args.reduce_num_ctx, reduce_system)
+        except editorial.EditorialFailure as exc:
+            print(f"[editorial] preflight unavailable: {exc}; no inference authorized", file=sys.stderr)
+            return 2
 
     chunks_jsonl = transcript_dir / "chunks_out" / "transcript_chunks.jsonl"
     if not chunks_jsonl.exists():
@@ -373,7 +401,9 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     ).expanduser().resolve()
 
     summaries_dir = _summary_dir or resolve_summary_dir(transcript_dir, summary_root)
-    summaries_dir.mkdir(parents=True, exist_ok=True, **({"mode": 0o700} if args.chunk_plan else {}))
+    summaries_dir.mkdir(parents=True, exist_ok=True, **({"mode": 0o700} if args.chunk_plan or args.meeting_notes else {}))
+    if args.meeting_notes:
+        write_private_json(summaries_dir / "editorial-review.private.json", {"status": "review_hold", "phase": "preparation"})
 
     aliases: dict[str, str] = {}
     approved_passages = []
@@ -589,7 +619,24 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
             row for row in chunk_summaries if row["meeting_section"] == RECAP
         ])
 
-    for output_filename, template_name in profile_cfg["outputs"]:
+    if profile == "meeting" and args.meeting_notes:
+        from meeting_postprocess import editorial
+        def generate_editorial(prompt, *, structured=False, num_predict):
+            return call_ollama(
+                ollama_url=args.ollama_url, model=args.reduce_model, prompt=prompt,
+                system=(reduce_system + "\nReturn only the requested JSON; no Markdown wrapper." if structured else reduce_system),
+                keep_alive=args.keep_alive, temperature=args.temperature, num_ctx=args.reduce_num_ctx,
+                num_predict=num_predict,
+                **({"response_format": "json"} if structured else {}),
+                **({"usage_callback": _usage_callback} if _usage_callback is not None else {}),
+            )
+        status = editorial.run(summaries_dir, chunks, combined, current_meeting_combined, recap_combined,
+                               commitments, source_context, aliases, approved_passages, redaction_warnings,
+                               prompt_dir, generate_editorial, args.keep_recap, budget=editorial_budget)
+        if status:
+            return status
+
+    for output_filename, template_name in ([] if args.meeting_notes else profile_cfg["outputs"]):
         template_path = prompt_dir / template_name
         if not template_path.exists():
             print(f"ERROR: Missing reduce prompt: {template_path}", file=sys.stderr)

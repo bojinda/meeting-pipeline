@@ -12,6 +12,8 @@ from .speaker_turns import CORRECTIONS_FILE, TURNS_FILE, CONFLICTS_FILE
 
 PUBLIC_MEETING_FILENAMES = ("summary.md", "action-items.md", "minutes-draft.md")
 PRIVATE_MEETING_FILENAMES = frozenset({PRIVATE_REDACTION_FILENAME.casefold(), PRIVATE_SUGGESTIONS_FILENAME.casefold(), PRIVATE_ROSTER_FILENAME.casefold(), "speaker_aliases.json", CORRECTIONS_FILE, TURNS_FILE, CONFLICTS_FILE, "whole-source.json", "whole-evidence.json", "whole-plan.json", "whole-run.json", "whole-model-response.json", "chunk-plan.json", "chunk-comparison.json"})
+EDITORIAL_PRIVATE_FILENAMES = frozenset({"action-register.private.json", "action-register.private.md", "editorial-review.private.json", "operator-review.private.md", "editorial-response.private.json", "notes-evidence.private.json", "editorial-budgets.private.json"})
+PRIVATE_MEETING_FILENAMES |= EDITORIAL_PRIVATE_FILENAMES
 
 
 def strip_private_references(content: str) -> str:
@@ -29,6 +31,10 @@ def _public_content(path: Path) -> str:
 
 
 def public_meeting_files(directory: Path) -> list[Path]:
+    # This prototype has no automatic publication approval mechanism. Hold even
+    # if a review JSON is missing, malformed or edited to say "approved".
+    if directory.is_dir() and any(path.name.casefold() in EDITORIAL_PRIVATE_FILENAMES | {"meeting-notes-draft.md"} for path in directory.iterdir()):
+        raise ValueError("Editorial meeting notes require operator review and separate distribution authorization; export is on hold")
     files = []
     private_files = [path for path in directory.iterdir() if path.name.casefold() in PRIVATE_MEETING_FILENAMES] if directory.is_dir() else []
     for name in PUBLIC_MEETING_FILENAMES:
@@ -70,6 +76,7 @@ def export_documents(directory: Path, destination: Path) -> list[Path]:
 def export_archive(directory: Path, destination: Path) -> None:
     if any(part.casefold() in PRIVATE_MEETING_FILENAMES for part in destination.parts) or destination.is_symlink():
         raise ValueError("Archive destination cannot be a private review path or symbolic link")
+    files = public_meeting_files(directory)
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in public_meeting_files(directory):
+        for path in files:
             archive.writestr(path.name, _public_content(path).rstrip() + "\n")

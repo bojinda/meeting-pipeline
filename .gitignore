@@ -70,3 +70,12 @@ whole-model-response.json
 # Private opt-in map/reduce chunk experiments
 chunk-plan.json
 chunk-comparison.json
+
+# Private editorial register, evidence and operator review (never publish)
+action-register.private.json
+action-register.private.md
+editorial-review.private.json
+operator-review.private.md
+editorial-response.private.json
+notes-evidence.private.json
+editorial-budgets.private.json

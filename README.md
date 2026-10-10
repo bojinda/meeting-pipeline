@@ -1182,6 +1182,108 @@ The private record, raw transcripts/audio, debug JSONL, QA files, and unlisted
 attachments are never included in these exports. Future publishers must use
 this shared boundary instead of copying the private processing directory.
 
+### Opt-in member-facing meeting notes
+
+The editorial prototype adds `meeting-notes-draft.md` with Meeting Highlights,
+previous-meeting context, substantive issues, recorded motions/decisions, a compact
+Recorded Undertakings table and brief Unresolved Matters. The target is about
+1,800–2,400 words for a substantial meeting. Short meetings are not padded, and a
+length finding requests review instead of cutting substantive issues automatically.
+Markdown headings and tables are rendered consistently by Python; model text is
+plain prose without decorative formatting or internal evidence citations.
+
+This remains opt-in until comparison review. A future authorized comparison can use:
+
+```bash
+bash bin/summarize-existing-meeting.sh /private/existing-transcript \
+  --meeting-notes --meeting-notes-output-dir /private/new-editorial-comparison \
+  --meeting-notes-tokenizer /private/models/matching-tokenizer/tokenizer.json \
+  --keep-recap
+```
+
+The destination must be new and outside transcript/production output directories.
+The existing GPU stage, selected models, context settings, maps, approved speaker
+corrections and redactions are reused. The three existing reductions become the
+private action register, member notes, and detailed minutes; optional recap still
+uses its existing reduction. There is no additional LLM extraction layer. An
+existing validated chunk plan may be passed with `--chunk-plan` and its tokenizer;
+use the editorial destination instead of `--chunk-comparison-dir`.
+
+One six-category `action-register.private.json` retains exact cited prepared source
+lines, original chunk identity, containing timestamps, ownership, uncertainty and
+status. Source text is already normalized, redacted and speaker-corrected; the
+original transcript remains unchanged. Categories distinguish undertakings,
+ongoing casework, proposals/unassigned matters, outside reports, completed work
+and recorded business. The notes table, standalone `action-items.md` and detailed
+minutes' Action Items section use the identical deterministic table. Only selected
+non-sensitive undertakings enter that table; an unknown owner remains explicitly
+unconfirmed. Conditions and source-based action guards remain authoritative.
+
+Reduction prompts receive a compact register with bounded local candidate IDs,
+without the repeated private evidence or operator detail. Exact source excerpts
+appear once per real ID; each is at most 1,800 characters. Oversized whole lines
+are explicit evidence gaps requiring review, never clipped or treated as support.
+Small consecutive evidence ranges (up to three lines / 1,800 characters) are
+preferred. Lexical support checks flag uncertain claims and actions, including
+material words scattered across unrelated passages. They do not verify semantics.
+
+Editorial mode requires a matching local `tokenizer.json` via
+`--meeting-notes-tokenizer` or `MEETING_NOTES_TOKENIZER`, the optional Python
+`tokenizers` package, and an explicitly configured reduce context. No tokenizer
+is downloaded. Every reduction counts its complete prompt/system text, disables
+saved tokenizer truncation/padding, reserves 1,024 framing tokens and output
+capacity (register/detailed: 16,384; notes/optional recap: 8,192), and refuses
+over-budget requests before generation. The output reserve is also the request's
+generation limit. No prompt is silently truncated or GPU allocation changed.
+Measurements are retained in `editorial-budgets.private.json`.
+
+For zero-inference accounting from saved prepared sources/maps and a full private
+register for the same source, run:
+
+```bash
+python3 -B bin/preflight_editorial.py /private/saved-source-and-maps \
+  /private/action-register.private.json \
+  --tokenizer /private/models/matching-tokenizer/tokenizer.json \
+  --num-ctx 196608 --keep-recap
+```
+
+This prints JSON without models, GPU locks or file writes. It checks source
+binding and measures the identical prompt builders used by live editorial
+reductions; its register-dependent budgets describe the supplied offline fixture.
+
+Private JSON/Markdown registers, `notes-evidence.private.json`, the operator
+checklist and `editorial-review.private.json` retain provenance and review needs.
+They are gitignored and explicitly excluded from export. The JSON register checks
+exact source references and conservative task/owner evidence; it does not certify
+all model paraphrases. Unsupported task wording, invalid schemas, fabricated
+references and detected identifying/private content fail closed. Failed model
+responses stay private and source-bound; diagnostic logs contain category codes.
+
+All editorial results carry a review hold. Review includes date, identity, material
+source conflicts, corrections, unresolved concerns, confidentiality and distribution
+authority. Missing source-backed commitments and out-of-range length also produce
+private findings. The checklist groups findings by publication relevance, with
+meeting date, distribution authority, member-facing undertaking owners,
+substantive conflicts and confidentiality first. Entries include the affected
+task/claim, a local candidate range and pointers into complete private evidence;
+private background identity concerns remain available separately. All material
+claims still require operator fact review. The export/payload/archive boundary refuses editorial directories,
+including when their review JSON is missing or edited to say approved. No automatic
+release/upload is implemented. The existing public filename allowlist is unchanged.
+Detailed source records and minutes remain available internally; a new title alone
+does not authorize circulation of official minutes or sensitive casework.
+
+Offline regression (mocked models only):
+
+```bash
+python3 -B -m unittest discover -s tests -p 'test_editorial*.py' -v
+```
+
+The full October regression requires the ignored supplied fixture, saved source
+and maps, and matching tokenizer. Override their paths with
+`OCTOBER_EDITORIAL_FIXTURE_ROOT`, `OCTOBER_EDITORIAL_SOURCE` and
+`OCTOBER_EDITORIAL_TOKENIZER`; it skips explicitly when private inputs are absent.
+
 ### Final QA
 
 Final meeting Markdown omits chunk IDs, source chunk labels, and source filenames.

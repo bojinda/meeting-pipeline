@@ -29,9 +29,9 @@ while [ "$#" -gt 0 ]; do
     --dual-gpu-target)
       if [ "$#" -lt 2 ] || [ -z "$2" ]; then echo "ERROR: named dual target required" >&2; exit 64; fi
       DUAL_TARGET="$2"; shift 2 ;;
-    --keep-recap|--no-keep-recap)
+    --keep-recap|--no-keep-recap|--meeting-notes)
       SUMMARY_OPTIONS+=("$1"); shift ;;
-    --speaker-aliases|--map-model|--reduce-model|--map-num-ctx|--reduce-num-ctx|--keep-alive|--temperature|--ollama-url|--chunk-plan|--chunk-comparison-dir|--chunk-tokenizer)
+    --speaker-aliases|--map-model|--reduce-model|--map-num-ctx|--reduce-num-ctx|--keep-alive|--temperature|--ollama-url|--chunk-plan|--chunk-comparison-dir|--chunk-tokenizer|--meeting-notes-output-dir|--meeting-notes-tokenizer)
       if [ "$#" -lt 2 ]; then echo "ERROR: missing summary option value" >&2; exit 64; fi
       SUMMARY_OPTIONS+=("$1" "$2"); shift 2 ;;
     *) echo "ERROR: unsupported historical summary option; map/reduce only" >&2; exit 64 ;;
