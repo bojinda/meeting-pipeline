@@ -110,8 +110,10 @@ class DispositionTests(unittest.TestCase):
             doc = (out / "meeting-notes-draft.md").read_text()
             self.assertNotIn("SPEAKER_", doc)
             self.assertNotIn("private grievance", doc)
-            self.assertIn("Owner awaiting confirmation", doc)
-            self.assertIn("Office agreement required", doc)
+            self.assertNotIn("Owner awaiting confirmation", doc)
+            self.assertNotIn(self.raw["items"][0]["task"], doc)
+            register = json.loads((out / ed.REGISTER).read_text())
+            self.assertEqual(register["selected_records"][0]["qualification"], "Office agreement required; no completion confirmed.")
             self.assertFalse(result["publication_authorized"])
             saved = json.loads((out / ed.RESPONSE).read_text())["register_assessment"]
             self.assertEqual(saved["proposed_register"], self.raw)
@@ -138,6 +140,21 @@ class DispositionTests(unittest.TestCase):
             with self.assertRaises(ed.EditorialFailure):
                 disp.prepare_held_draft(out, self.raw, self.records, self.commitments, self.source, self.decisions, n)
             self.assertFalse((out/"meeting-notes-draft.md").exists())
+
+    def test_source_linked_concerns_and_reference_changes_stay_private(self):
+        notes = copy.deepcopy(self.notes)
+        notes["concerns"] = [{"category": "confidentiality", "text": "Medical history requires private operator review.",
+                              "source_ids": ["1:L3", "1:L1"]}]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "held"
+            result = disp.prepare_held_draft(out, self.raw, self.records, self.commitments, self.source, self.decisions, notes)
+            self.assertEqual(json.loads((out / ed.RESPONSE).read_text())["notes_proposal"], notes)
+            changes = json.loads((out / ed.DIAGNOSTICS).read_text())["notes_reference_changes"]
+            self.assertEqual(changes[0]["original_source_ids"], ["1:L3", "1:L1"])
+            self.assertEqual(changes[0]["canonical_source_ids"], ["1:L1", "1:L3"])
+            concern = next(f for f in result["findings"] if "concern_text" in f)
+            self.assertEqual(concern["source_ids"], ["1:L1", "1:L3"])
+            self.assertNotIn(concern["concern_text"], (out / "meeting-notes-draft.md").read_text())
 
     def test_saved_selected_view_keeps_all_original_failures(self):
         live = ROOT / "ignore/october-editorial-live.wnfcYj/editorial-output"

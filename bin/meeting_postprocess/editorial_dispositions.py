@@ -88,11 +88,15 @@ def prepare_held_draft(directory, raw, records, commitments, source, decisions, 
     # Place the existing fail-closed publication marker before doing any work.
     ed.write_private_json(directory / ed.REVIEW, {"status": "review_hold", "phase": "incomplete"})
     original = ed.audit_register(raw, records, commitments, source)
-    ed.write_private_json(directory / ed.RESPONSE, {"register_assessment": original})
+    ed.write_private_json(directory / ed.RESPONSE, {"register_assessment": original, "notes_proposal": deepcopy(notes)})
     ed.write_private_json(directory / DISPOSITIONS, deepcopy(decisions))
     try:
         original, register, selections = reviewed_register(raw, records, commitments, source, decisions)
-        checked_notes = ed.validate_notes(notes, records, source)
+        reference_changes = []
+        try:
+            checked_notes = ed.validate_notes(notes, records, source, reference_changes=reference_changes)
+        finally:
+            ed.write_private_json(directory / ed.DIAGNOSTICS, {"requests": [], "notes_reference_changes": reference_changes})
         # Identity confirmation is outside this bounded mechanism. Even a name
         # in source text is not automatically promoted to a public owner label.
         presentation = deepcopy(register)
@@ -107,7 +111,7 @@ def prepare_held_draft(directory, raw, records, commitments, source, decisions, 
         for location, block in ed.notes_blocks(checked_notes):
             flags.append({"code": "notes_semantic_review", "notes_location": location,
                           "source_ids": block["source_ids"], "support": block["support"]})
-        flags += [{"code": c} for c in checked_notes["concerns"]]
+        flags += ed.notes_concern_findings(checked_notes)
         review = {"status": "review_hold", "phase": "held_draft_prepared",
                   "source_hash": ed.digest(records), "dispositions_hash": ed.digest(decisions),
                   "original_hard_block_count": original["hard_block_count"],

@@ -63,7 +63,8 @@ def fixture():
                  {"heading": "Mac Yard staffing", "paragraphs": [block("An initial approximate 70% abolition was followed by changed relief assignments. Of four jobs cut, one was planned to return; implementation remained unconfirmed.", "3:L9", "3:L10")]},
                  {"heading": "MRS safety", "paragraphs": [block("MRS journals still differed from the consist, including dangerous-commodity sequencing.", "3:L11")]},
              ], "motions": [block("Motion to adjourn moved by Taylor, seconded by Riley.", "4:L1")],
-             "unresolved": [block("Distribution remained under discussion after the motion.", "4:L2")], "concerns": ["policy_sensitive"]}
+             "unresolved": [block("Distribution remained under discussion after the motion.", "4:L2")],
+             "concerns": [{"category": "policy_sensitive", "text": "Distribution authority remains unconfirmed.", "source_ids": ["4:L2"]}]}
     return chunks, raw, notes
 
 
@@ -181,7 +182,7 @@ class EditorialTests(unittest.TestCase):
         reg = ed.validate_register(raw, records, commitment_evidence(chunks, include_context=True), self.source)
         self.assertIn("SPEAKER_03", json.dumps(reg))
         self.assertNotIn("SPEAKER_03", ed.undertaking_table(reg))
-        self.assertIn("Owner awaiting confirmation", ed.undertaking_table(reg))
+        self.assertNotIn(raw["items"][0]["task"], ed.undertaking_table(reg))
         self.assertTrue(any(f["code"] == "unverified_owner" for f in reg["findings"]))
 
     def test_bad_references_recap_and_duplicate_items_fail_closed(self):
@@ -351,7 +352,8 @@ class EditorialTests(unittest.TestCase):
                     return json.dumps({"items": [{"id": "A1", "category": "undertaking", "task": "Send the report to the committee.", "owners": ["Taylor"], "source_ids": [row["id"]], "member_facing": True, "concerns": []}]})
                 if "summary-reduction call" in prompt:
                     data = json.loads(prompt.split("Untrusted input JSON:\n")[1])
-                    ref = data["register"]["items"][0]["source_ids"]
+                    self.assertEqual(data["register"]["items"], [])
+                    ref = [next(r["id"] for r in data["source_excerpts"] if "I'll send" in r["text"])]
                     block = {"text": "The committee report was discussed.", "source_ids": ref}
                     return json.dumps({"highlights": [block], "previous_context": [], "issues": [{"heading": "Committee reporting", "paragraphs": [block]}], "motions": [], "unresolved": [], "concerns": []})
                 return "# Detailed Minutes\n## Topics\nCommittee reporting.\n## Action Items\n- Morgan: Invented task"

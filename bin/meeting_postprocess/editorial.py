@@ -125,12 +125,16 @@ def model_register(register):
     """Compact presentation data; all full evidence remains in private JSON."""
     items = []
     for item in register["items"]:
+        # Initial drafting has no operator-approved assignments. Keep these
+        # candidates in private review, not in either member-facing projection.
+        if item["category"] == "undertaking":
+            continue
         support = item.get("support") or local_support(item["task"], item["evidence"])
         items.append({**{key: item[key] for key in ("id", "category", "task", "owners", "member_facing", "concerns", "status")},
                       "source_ids": support["local_source_ids"], "support": support["status"]})
     return {"items": items, "evidence_scope": "bounded local candidates; complete provenance retained privately",
             "validation": "unapproved_candidates; operator_semantic_review_required",
-            "selection_policy": "Excluded/private proposals remain in the private audit. Their absence does not remove substantive issues from source evidence or summaries. Discuss supported issues without promoting omitted actions into assignments."}
+            "selection_policy": "Undertaking candidates and excluded/private proposals remain in private review. Their absence does not remove substantive issues from source evidence or summaries. Discuss supported issues without promoting omitted actions into assignments."}
 
 
 def source_excerpts(records):
@@ -212,15 +216,17 @@ def _list(value):
     return isinstance(value, list)
 
 
-def _refs(ids, records, *, recap=False):
+def _refs(ids, records, *, recap=False, sections=None, canonical=False):
     if not _list(ids) or not ids or any(not isinstance(i, str) for i in ids) or len(ids) != len(set(ids)):
         raise EditorialFailure("invalid_source_references")
-    if any(i not in records or (not recap and records[i]["section"] == RECAP) for i in ids):
+    if any(i not in records or (not recap and records[i]["section"] == RECAP)
+           or (sections is not None and records[i]["section"] not in sections) for i in ids):
         raise EditorialFailure("invalid_source_references")
     positions = {key: i for i, key in enumerate(records)}
-    if ids != sorted(ids, key=positions.get):
+    ordered = sorted(ids, key=positions.get)
+    if not canonical and ids != ordered:
         raise EditorialFailure("unordered_source_references")
-    return [records[i] for i in ids]
+    return [records[i] for i in ordered]
 
 
 def _words(text):
@@ -551,53 +557,71 @@ def _plain(text):
     return text.strip()
 
 
-def validate_notes(raw, records, source):
+def validate_notes(raw, records, source, *, reference_changes=None):
     if not _object(raw, "highlights previous_context issues motions unresolved concerns"):
         raise EditorialFailure("invalid_notes_schema")
-    if not _list(raw["concerns"]) or any(not isinstance(c, str) or c not in CONCERNS for c in raw["concerns"]):
+    if not _list(raw["concerns"]):
         raise EditorialFailure("invalid_review_flags")
-    def block(value, historical=False):
+    def references(ids, sections, location):
+        # Validate every ID and its context before doing the sole allowed repair.
+        refs = _refs(ids, records, recap=RECAP in sections, sections=sections, canonical=True)
+        ordered = [r["id"] for r in refs]
+        if ids != ordered and reference_changes is not None:
+            reference_changes.append({"code": "notes_reference_order_normalized", "notes_location": location,
+                                      "original_source_ids": list(ids), "canonical_source_ids": ordered})
+        return refs
+    concerns = []
+    for index, concern in enumerate(raw["concerns"]):
+        if (not _object(concern, "category text source_ids")
+                or not isinstance(concern["category"], str) or concern["category"] not in CONCERNS
+                or not _text(concern["text"])):
+            raise EditorialFailure("invalid_notes_concern")
+        # Private concern text may contain the sensitive detail that must never
+        # enter member prose. Do not apply _plain's public-content guard here.
+        refs = references(concern["source_ids"], {RECAP, BUSINESS, ADJOURNMENT}, f"concerns/{index}")
+        concerns.append({**concern, "source_ids": [r["id"] for r in refs]})
+    def block(value, location, historical=False):
         if not _object(value, "text source_ids"):
             raise EditorialFailure("invalid_notes_block")
         _plain(value["text"])
-        refs = _refs(value["source_ids"], records, recap=historical)
-        if historical and any(r["section"] != RECAP for r in refs):
-            raise EditorialFailure("invalid_recap_section")
+        refs = references(value["source_ids"], {RECAP} if historical else {BUSINESS, ADJOURNMENT}, location)
         # These deterministic repairs use the same explicit motion evidence as
         # detailed minutes. Plain prose remains subject to operator fact review.
-        return {**value, "text": correct_adjournment_roles(value["text"], source),
+        return {**value, "source_ids": [r["id"] for r in refs], "text": correct_adjournment_roles(value["text"], source),
                 "support": local_support(value["text"], refs)}
-    clean = {"concerns": raw["concerns"]}
+    clean = {"concerns": concerns}
     for key in ("highlights", "previous_context", "motions", "unresolved"):
         if not _list(raw[key]):
             raise EditorialFailure("invalid_notes_section")
-        clean[key] = [block(b, key == "previous_context") for b in raw[key]]
+        clean[key] = [block(b, f"{key}/{index}", key == "previous_context") for index, b in enumerate(raw[key])]
     if not _list(raw["issues"]) or not raw["issues"]:
         raise EditorialFailure("missing_current_business")
     headings = set()
     clean["issues"] = []
     reserved = {"meeting highlights", "previous-meeting context", "recorded motions and decisions", "recorded undertakings", "unresolved matters", "open questions", "important notes", "action items"}
-    for issue in raw["issues"]:
+    for index, issue in enumerate(raw["issues"]):
         if not _object(issue, "heading paragraphs") or not _list(issue["paragraphs"]) or not issue["paragraphs"]:
             raise EditorialFailure("invalid_issue_section")
         heading = _plain(issue["heading"])
         if heading.casefold() in reserved | headings:
             raise EditorialFailure("duplicate_or_reserved_heading")
         headings.add(heading.casefold())
-        clean["issues"].append({"heading": heading, "paragraphs": [block(p) for p in issue["paragraphs"]]})
+        clean["issues"].append({"heading": heading, "paragraphs": [block(p, f"issues/{index}/paragraphs/{number}")
+                                                               for number, p in enumerate(issue["paragraphs"])]})
     return clean
 
 
 def undertaking_table(register):
-    lines = ["| Undertaking | Responsible person or verified role | Recorded status |", "|---|---|---|"]
-    for item in register["items"]:
-        if item["category"] != "undertaking" or not item["member_facing"]:
-            continue
-        task = _plain(item["task"])
-        owner = "; ".join(item["owners"]) if not register.get("automatic_triage") and item["owners"] and not any(SPEAKER_LABEL.search(n) for n in item["owners"]) else "Owner awaiting confirmation"
-        owner = _plain(owner)
-        lines.append(f"| {task} | {owner} | {item['status']} |")
-    return "\n".join(lines) if len(lines) > 2 else "No member-facing undertaking candidates selected; private review remains pending."
+    # All current registers contain proposals or held candidates, not approved
+    # assignments. Validation, selection and member_facing are not approval.
+    # There is no assignment-approval input to this initial-draft renderer.
+    return "Undertaking candidates remain in the private review register pending operator approval."
+
+
+def notes_concern_findings(notes):
+    return [{"code": concern["category"], "concern_text": concern["text"], "source_ids": concern["source_ids"],
+             "evidence_pointer": f"{NOTES_EVIDENCE}#/notes/concerns/{index}"}
+            for index, concern in enumerate(notes["concerns"])]
 
 
 def render_notes(notes, register):
@@ -612,7 +636,7 @@ def render_notes(notes, register):
     lines += ["## Recorded motions and decisions", ""]
     lines += [b["text"] + "\n" for b in notes["motions"]] or ["No supported motions or decisions recorded.\n"]
     lines += ["## Recorded Undertakings", "", undertaking_table(register), "",
-              "Reported outside undertakings, existing casework, proposals and completed work remain separate from this table.", "", "## Unresolved Matters", ""]
+              "Reported outside undertakings, existing casework, proposals and completed work remain separate from division assignments.", "", "## Unresolved Matters", ""]
     lines += [b["text"] + "\n" for b in notes["unresolved"]] or ["None noted.\n"]
     return "\n".join(lines).strip() + "\n"
 
@@ -713,7 +737,7 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
     checklist = ["# Private Operator Review", "", "Review hold — no publication authorization.", "",
                  "Source-ID and lexical checks do not certify factual accuracy. Review every material claim against its source.",
                  f"Complete provenance: [{REGISTER}]({REGISTER}) and [{NOTES_EVIDENCE}]({NOTES_EVIDENCE}).", ""]
-    flags = register["findings"] + [{"code": c} for c in notes["concerns"]]
+    flags = register["findings"] + notes_concern_findings(notes)
     if not 1800 <= len(document.split()) <= 2400:
         flags.append({"code": "length_review"})
     flags += [{"code": f.code} for f in findings]
@@ -734,6 +758,8 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
                 checklist += [f"  Task: {entry['task']} Owners: {', '.join(entry['owners']) or 'Unassigned'}."]
             if "claim" in entry:
                 checklist += [f"  Claim: {entry['claim']}"]
+            if "concern_text" in entry:
+                checklist += [f"  Sources: {', '.join(entry['source_ids'])}."]
             if "evidence_pointer" in entry:
                 checklist += [f"  Evidence: {entry['evidence_pointer']}; local candidate: {', '.join(entry.get('local_source_ids', [])) or 'none'}."]
             if "operator_detail" in entry:
@@ -749,6 +775,7 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
         checklist += ["## Complete original register audit", "", register_review_checklist(assessment)]
     blocks = [b for key in ("highlights", "previous_context", "motions", "unresolved") for b in notes[key]]
     blocks += [b for issue in notes["issues"] for b in issue["paragraphs"]]
+    blocks += notes["concerns"]
     cited = {key for block in blocks for key in block["source_ids"]}
     write_private_json(directory / NOTES_EVIDENCE, {"source_hash": register["source_hash"], "notes": notes,
                        "sources": records,
@@ -767,8 +794,8 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
     if assessment is not None:
         internal += ["## Complete original model register and validation findings", "", register_review_checklist(assessment)]
     private_text(directory / REGISTER_MD, "\n".join(internal))
-    # Only checked candidates enter the shared table. Original blocked actions
-    # remain private. Notes safeguards must succeed before any member draft.
+    # All undertaking candidates and original blocked actions remain private.
+    # Notes safeguards must succeed before any member draft.
     outputs = {"meeting-notes-draft.md": document,
                "action-items.md": "# Recorded Undertakings\n\nDraft for operator review.\n\n" + table + "\n",
                "summary.md": "# Meeting Highlights\n\n" + "\n".join("- " + b["text"] for b in notes["highlights"]) + "\n",
@@ -784,7 +811,7 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
     write_private_json(directory / REVIEW, {"status": "review_hold", "phase": "incomplete"})
     records = source_records(chunks)
     source = "\n".join(c["text"] for c in chunks if c["meeting_section"] in {BUSINESS, ADJOURNMENT})
-    raw, assessment, diagnostics = {}, None, []
+    raw, assessment, diagnostics, reference_changes = {}, None, [], []
     phase = "register"
     def request(stage, prompt, structured=False):
         measured = budget.measure(stage, prompt, structured)
@@ -793,7 +820,7 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
             raise EditorialFailure("editorial_" + stage + "_context_exceeded")
         def record_response(info):
             diagnostics.append({"stage": stage, **info})
-            write_private_json(directory / DIAGNOSTICS, {"requests": diagnostics})
+            write_private_json(directory / DIAGNOSTICS, {"requests": diagnostics, "notes_reference_changes": reference_changes})
         # CPU fixtures may supply the legacy callable; the production adapter
         # explicitly accepts the response callback. No backend retry is made.
         import inspect
@@ -821,7 +848,10 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
             proposed_notes = json.loads(raw["notes"])
         except json.JSONDecodeError:
             raise EditorialFailure("editorial_notes_invalid_json") from None
-        notes = validate_notes(proposed_notes, visible, source)
+        try:
+            notes = validate_notes(proposed_notes, visible, source, reference_changes=reference_changes)
+        finally:
+            write_private_json(directory / DIAGNOSTICS, {"requests": diagnostics, "notes_reference_changes": reference_changes})
         for key in records.keys() - visible.keys():
             register["findings"].append({"code": "source_excerpt_coverage_review", "source_id": key})
         phase = "detailed"

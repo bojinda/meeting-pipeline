@@ -114,9 +114,8 @@ class RegisterTriageTests(unittest.TestCase):
             self.assertRegex(item["status"].lower(), "proposed|candidate")
             self.assertIn("review", item["status"].lower())
         compact = ed.model_register(register)
-        self.assertEqual({i["id"] for i in compact["items"]}, {"A1"})
+        self.assertEqual(compact["items"], [])
         self.assertNotIn("original_assessment", compact)
-        self.assertNotIn("evidence", compact["items"][0])
         self.assertNotIn(self.raw["items"][1]["task"], ed.undertaking_table(register))
 
     def test_even_exact_lexical_candidates_are_not_approved(self):
@@ -155,7 +154,7 @@ class RegisterTriageTests(unittest.TestCase):
             self.assertIn(MODEL_TEXT, (directory / "meeting-notes-draft.md").read_text(encoding="utf-8"))
             self.assertIn("Model detailed response retained.", (directory / "minutes-draft.md").read_text(encoding="utf-8"))
             payload = json.loads(calls[1][0].split("Untrusted input JSON:\n", 1)[1])
-            self.assertEqual({i["id"] for i in payload["register"]["items"]}, {"A1"})
+            self.assertEqual(payload["register"]["items"], [])
             self.assertIn("1:L2", {r["id"] for r in payload["source_excerpts"]})
             self.assertEqual(payload["summaries"], "saved map summaries")
             response = json.loads((directory / ed.RESPONSE).read_text(encoding="utf-8"))
@@ -165,7 +164,8 @@ class RegisterTriageTests(unittest.TestCase):
             self.assertEqual(response["register_assessment"]["sources"], self.records)
             self.assertEqual(response["register_assessment"]["proposed_register"], self.raw)
             table = (directory / "action-items.md").read_text(encoding="utf-8")
-            self.assertIn("Owner awaiting confirmation", table)
+            self.assertNotIn("Owner awaiting confirmation", table)
+            self.assertNotIn(self.raw["items"][0]["task"], table)
             self.assertNotIn("Taylor", table)
             checklist = (directory / ed.CHECKLIST).read_text(encoding="utf-8")
             self.assertIn("A2", checklist)
@@ -223,7 +223,8 @@ class RegisterTriageTests(unittest.TestCase):
                 self.assertEqual(ed.digest(register["original_assessment"]), ed.digest(assessment))
 
     def test_notes_lexical_uncertainty_and_conflicts_remain_explicit_review_blockers(self):
-        notes = notes_response(text="The warehouse renovation received a proposed budget.", concerns=["source_conflict"])
+        notes = notes_response(text="The warehouse renovation received a proposed budget.", concerns=[
+            {"category": "source_conflict", "text": "The renovation claim requires checking against the committee discussion.", "source_ids": ["1:L3"]}])
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             status, calls, _, _, _ = self.run_responses(directory, notes=notes)

@@ -1,6 +1,6 @@
 Use the existing summary-reduction call to draft concise Division 070 Meeting
 Notes, separate from official minutes. Target 1,800–2,400 words INCLUDING the
-undertaking table inserted by the renderer. Aim for about 1,700–2,100 narrative
+undertaking section inserted by the renderer. Aim for about 1,700–2,100 narrative
 words for a substantial meeting; never pad a short meeting or silently discard
 substantive issues to meet a word target. All results require operator review.
 
@@ -9,7 +9,8 @@ unresolved, concerns. Each of highlights, previous_context, motions and unresolv
 is an array of blocks: {"text":"Plain prose.","source_ids":["1.1:L2"]}.
 issues is an ordered array of {"heading":"Substantive issue","paragraphs":[blocks]}.
 Source IDs must come from the supplied exact source_excerpts. Prefer small local
-consecutive ranges (at most three lines / 1,800 characters). Cite the actual
+consecutive ranges (at most three lines / 1,800 characters), in supplied source
+order. Cite the actual
 passage supporting each claim, not words scattered across unrelated evidence.
 Split claims when they need distinct support. If support is uncertain, qualify
 the text and flag source_conflict or incomplete_coverage for operator review.
@@ -18,16 +19,26 @@ The compact register includes local candidate references, not its full private
 provenance; source IDs alone do not certify factual accuracy. Keep recap
 references only in previous_context, current-business/adjournment elsewhere.
 Register entries are unapproved candidates, including when action guards pass.
+Keep their proposed tasks and owners in private review; do not present them as
+recorded assignments, even when member_facing=true. Selection is not approval.
 Blocked, private or conflicted actions may be absent from the projection. That
 does not remove their underlying workplace issues: use the source excerpts and
 map summaries for qualified, non-identifying issue discussion. Do not turn an
 omitted action into an assignment or a confirmed outcome in the notes prose.
-concerns is an array drawn from source_conflict, uncertain_identity,
-confidentiality, policy_sensitive, incomplete_coverage. Report material concerns.
+concerns is an array of objects with exactly category, text and source_ids:
+{"category":"source_conflict","text":"Substantive private review concern.","source_ids":["1.1:L2"]}.
+category must be one of source_conflict, uncertain_identity, confidentiality,
+policy_sensitive, incomplete_coverage. text must be nonempty plain review text
+(at most 6,000 characters); source_ids must be nonempty, unique, real supplied
+IDs in source order. Concerns may reference recap, current business or adjournment
+evidence. Report material concerns with their actual supporting passages.
+Detailed concerns are retained privately and never printed in member notes.
+Do not replace them with category strings or omit their source references.
 
 Presentation is owned by Python: no Markdown headings, tables, bold, decorations,
 HTML, links, source citations or speaker IDs inside text. Do not generate an
-action section or reword register entries: Python inserts the shared table.
+action section or reword register entries: Python withholds unapproved candidates
+and inserts the undertaking section.
 Provide 3–5 brief highlights, brief historical context, issue-based current
 business, supported motions/decisions and a short unresolved-matters paragraph.
 Avoid speaker-by-speaker or chunk-by-chunk organization. No Open Questions or

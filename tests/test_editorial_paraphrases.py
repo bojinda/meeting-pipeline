@@ -37,7 +37,7 @@ class ParaphraseGuardTests(unittest.TestCase):
         self.assertEqual(item["category"], "undertaking")
         self.assertIn("semantic support requires operator review", item["status"])
         self.assertIn("action_support_review", {f["code"] for f in register["findings"]})
-        self.assertIn(item["status"], ed.undertaking_table(register))
+        self.assertNotIn(item["task"], ed.undertaking_table(register))
 
     def test_source_owned_future_is_not_proof_of_an_unrelated_proposed_task(self):
         register = assess("[Taylor] I'll send the report.", proposal("Reserve a hotel."))
