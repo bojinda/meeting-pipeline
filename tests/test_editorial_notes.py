@@ -363,12 +363,12 @@ class EditorialTests(unittest.TestCase):
             reduced = [c for c in calls if "Transcript chunk:" not in c["prompt"]]
             self.assertEqual(len(reduced), 3)
             self.assertEqual([c.get("response_format") for c in reduced], ["json", "json", None])
-            self.assertEqual([c["num_predict"] for c in reduced], [16384, 24576, 16384])
+            self.assertEqual([c["num_predict"] for c in reduced], [16384, 49152, 16384])
             self.assertTrue(all(c["thinking"] is None for c in reduced))
             budgets = json.loads((output / ed.BUDGETS).read_text())["requests"]
             self.assertTrue(all(r["fits"] for r in budgets))
-            self.assertEqual([r["reserved_output"] for r in budgets], [16384, 24576, 16384])
-            self.assertEqual(budgets[1]["required_context"], budgets[1]["input_tokens"] + 24576 + 1024)
+            self.assertEqual([r["reserved_output"] for r in budgets], [16384, 49152, 16384])
+            self.assertEqual(budgets[1]["required_context"], budgets[1]["input_tokens"] + 49152 + 1024)
             table = ed.undertaking_table(json.loads((output / ed.REGISTER).read_text()))
             for name in ("meeting-notes-draft.md", "action-items.md", "minutes-draft.md"):
                 result = (output / name).read_text()
@@ -452,6 +452,17 @@ class EditorialTests(unittest.TestCase):
         for tokenizer, context in ((None, 196608), (self.tokenizer_path, None), ("missing-tokenizer.json", 196608)):
             with self.subTest(tokenizer=tokenizer, context=context), self.assertRaises(ed.EditorialFailure):
                 ed.RequestBudget(tokenizer, context, "system")
+
+    def test_notes_allowance_fits_june_input_without_changing_other_stages(self):
+        self.assertEqual(ed.OUTPUT_TOKENS, {"register": 16384, "notes": 49152, "detailed": 16384, "recap": 8192})
+        budget = self.budget()
+        with patch.object(budget, "count", return_value=67001):
+            row = budget.measure("notes", "Synthetic June-sized token count", True)
+        self.assertEqual(row["reserved_output"], 49152)
+        self.assertEqual(row["required_context"], 117177)
+        self.assertEqual(row["configured_context"], 196608)
+        self.assertEqual(row["headroom"], 79431)
+        self.assertTrue(row["fits"])
 
     def test_every_editorial_slot_fails_preflight_before_overbudget_generation(self):
         from unittest.mock import Mock

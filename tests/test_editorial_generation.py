@@ -180,13 +180,18 @@ class EditorialContinuationTests(unittest.TestCase):
         return self.argv(out, "--meeting-notes-checkpoint", str(original / cp.FILE), "--meeting-notes-checkpoint-sha256", cp.file_hash(original / cp.FILE))
 
     def test_verified_continuation_uses_only_reductions_and_actual_model_notes(self):
-        original, record, stage = self.original()
+        # A completed-map checkpoint from the prior notes allowance remains
+        # compatible with this editorial-only increase in a fresh owned stage.
+        with patch.dict(ed.OUTPUT_TOKENS, {"notes": 24576}):
+            original, record, stage = self.original()
+        self.assertEqual(json.loads((original / ed.BUDGETS).read_text())["requests"][1]["reserved_output"], 24576)
         before = {p.name: p.read_bytes() for p in original.iterdir() if p.is_file()}
         env, modules, _ = self.fresh(original, record, stage)
         out = self.root / "continued"
         with patch.dict(sys.modules, modules):
             self.assertEqual(self.run_main(self.continuation_argv(original, out), env), 0)
         self.assertEqual(len(self.payloads), 3)
+        self.assertEqual([p["options"]["num_predict"] for p in self.payloads], [16384, 49152, 16384])
         self.assertFalse(any("Transcript chunk:" in p["prompt"] for p in self.payloads))
         self.assertIn("The model generated", (out / "meeting-notes-draft.md").read_text())
         self.assertEqual({p.name: p.read_bytes() for p in original.iterdir() if p.is_file()}, before)
@@ -197,6 +202,34 @@ class EditorialContinuationTests(unittest.TestCase):
             publication_payload(out)
         with self.assertRaisesRegex(ValueError, "hold"):
             export_documents(out, self.root / "export")
+
+    def test_notes_generation_limit_rejects_substantial_final_text_before_saving_it(self):
+        for count in (24576, 49152):
+            with self.subTest(eval_count=count):
+                def backend(url, payload, timeout):
+                    data = self.backend(url, payload, timeout)
+                    if "summary-reduction call" in payload["prompt"]:
+                        notes = json.loads(data["response"])
+                        notes["issues"][0]["paragraphs"][0]["text"] *= 100
+                        data.update(response=json.dumps(notes), done_reason="length", eval_count=count)
+                    return data
+                output = self.root / f"notes-limit-{count}"
+                self.payloads.clear()
+                self.assertEqual(self.run_main(self.argv(output), backend=backend), 1)
+                self.assertEqual(len(self.payloads), 3)  # Map, register, then rejected notes.
+                self.assertEqual(self.payloads[-1]["options"]["num_predict"], 49152)
+                responses = json.loads((output / ed.RESPONSE).read_text())["responses"]
+                self.assertIn("register", responses)
+                self.assertNotIn("notes", responses)
+                diagnostic = json.loads((output / ed.DIAGNOSTICS).read_text())["requests"][-1]
+                self.assertGreater(diagnostic["response_char_count"], 4000)
+                self.assertEqual(diagnostic["failure_category"], "ollama_generation_limit")
+                self.assertEqual(diagnostic["done_reason"], "length")
+                self.assertEqual(diagnostic["num_predict"], 49152)
+                self.assertFalse((output / "meeting-notes-draft.md").exists())
+                self.assertTrue((output / cp.FILE).exists())
+                self.assertEqual(json.loads((output / ed.REVIEW).read_text())["status"], "review_hold")
+                self.assertNotIn("PRIVATE_TRACE_SENTINEL", "".join(p.read_text() for p in output.iterdir() if p.is_file()))
 
     def test_checkpoint_identity_changed_maps_source_approval_configuration_and_code_fail_before_generation(self):
         original, record, original_stage = self.original()

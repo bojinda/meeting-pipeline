@@ -128,7 +128,7 @@ if pathlib.Path(sys.argv[0]).name == 'ollama_meeting_summary.py':
         calls = [json.loads(line) for line in self.calls_file.read_text().splitlines()]
         reduced = [c for c in calls if "Transcript chunk:" not in c["prompt"]]
         self.assertEqual(len(reduced), 2)
-        self.assertEqual([c["num_predict"] for c in reduced], [16384, 24576])
+        self.assertEqual([c["num_predict"] for c in reduced], [16384, 49152])
         self.assertTrue(all(c["num_ctx"] == 196608 and c["model"] == "qwen3.8:27b" and c["thinking"] is None for c in reduced))
         self.assertTrue(all(c["num_ctx"] == 16384 for c in calls if "Transcript chunk:" in c["prompt"]))
         self.assertNotIn("PRIVATE_SECRET", json.dumps(calls))

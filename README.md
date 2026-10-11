@@ -1296,7 +1296,7 @@ The unattended postprocessing wrapper selects this notes mode automatically.
 The summary wrapper supplies a fresh private destination, the existing local
 Qwen3.5 tokenizer path (or `MEETING_NOTES_TOKENIZER`), and the established 196,608
 editorial context. Meeting-specific model settings remain authoritative, with
-Qwen3.8:27b defaults when absent; the notes allowance remains 24,576 and thinking
+Qwen3.8:27b defaults when absent; the notes allowance is 49,152 and thinking
 uses the model's default-on behavior. Explicit CLI output/model/context/tokenizer
 and `--meeting-notes-thinking` overrides remain supported. No checkpoint or
 operator-supplied hash is required for an ordinary run.
@@ -1368,7 +1368,7 @@ Editorial mode requires a matching local `tokenizer.json` via
 `tokenizers` package, and an explicitly configured reduce context. No tokenizer
 is downloaded. Every reduction counts its complete prompt/system text, disables
 saved tokenizer truncation/padding, reserves 1,024 framing tokens and output
-capacity (notes: 24,576; register/detailed: 16,384; optional recap: 8,192), and refuses
+capacity (notes: 49,152; register/detailed: 16,384; optional recap: 8,192), and refuses
 over-budget requests before generation. The output reserve is also the request's
 generation limit. No prompt is silently truncated or GPU allocation changed.
 Measurements are retained in `editorial-budgets.private.json`.
