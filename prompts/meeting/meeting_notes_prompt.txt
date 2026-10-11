@@ -1,8 +1,9 @@
 Use the existing summary-reduction call to draft concise Division 070 Meeting
-Notes, separate from official minutes. Target 1,800–2,400 words INCLUDING the
-undertaking section inserted by the renderer. Aim for about 1,700–2,100 narrative
-words for a substantial meeting; never pad a short meeting or silently discard
-substantive issues to meet a word target. All results require operator review.
+Notes, separate from official minutes. Aim for approximately 2,000 words total
+for a substantial meeting, normally 1,800–2,400. This is guidance, not a fixed
+limit: exceed it when important union business warrants the space, not through
+repetition. Never pad a short meeting or discard substantive issues to meet a
+word target. All results require operator review.
 
 Return JSON only with exactly: highlights, previous_context, issues, motions,
 unresolved, concerns. Each of highlights, previous_context, motions and unresolved
@@ -39,14 +40,26 @@ Presentation is owned by Python: no Markdown headings, tables, bold, decorations
 HTML, links, source citations or speaker IDs inside text. Do not generate an
 action section or reword register entries: Python withholds unapproved candidates
 and inserts the undertaking section.
-Provide 3–5 brief highlights, brief historical context, issue-based current
+Provide 3–5 concise, one-sentence highlights that introduce the main issues;
+keep supporting detail in the main sections rather than summarizing it twice.
+Provide brief historical context, issue-based current
 business, supported motions/decisions and a short unresolved-matters paragraph.
+Keep the required JSON keys; use [] for optional sections with no substantive
+content. Do not supply empty-section placeholders, administrative-only issue
+sections or an undertaking section without confirmed undertakings. Unapproved
+candidates remain private, as specified above.
 Prioritize substantive union business: collective-agreement disputes, health and
 safety, legislative developments, grievances, motions and unresolved operational
 problems. Cover material topics even when discussed briefly; discussion time or
 repetition is not a measure of importance. Weigh consequences for members, safety
 and dispute status. Exclude incidental chatter rather than compressing away a
 significant issue. Do not invent coverage for topics absent from the evidence.
+Preserve important union positions, criticism of CN and opinions about company
+practices with their substance and tone. Retain source-supported, anonymized
+grievance and discipline outcomes, WSIB examples, financial figures and health
+and safety concerns. Do not soften union positions or strip meaningful amounts
+and outcomes merely to shorten the notes; protect unnecessary personal identity
+and sensitive medical detail as specified below.
 
 Organize by issue, not speaker or transcript chunk. Use clear issue headings and
 readable paragraphs that explain the concern, relevant context, reported work,
@@ -56,6 +69,10 @@ corrections. Highlights should concisely identify the most important business,
 not repeat every detail. No repeated headings, speculative questions, Open
 Questions or Important Notes dumps. A shorter meeting may need far fewer words;
 do not pad it or invent context to reach the substantial-meeting word target.
+Give each fact, outcome, figure or case example one primary place. Merge repeated
+accounts of the same issue; retain distinct developments and disagreements.
+Before returning, remove repetition across highlights, issue paragraphs, motions
+and unresolved matters, excessive procedural detail and unrelated side discussions.
 
 Distinguish what the meeting record establishes from participant statements,
 allegations, rumours and interpretations. State supported procedural facts
