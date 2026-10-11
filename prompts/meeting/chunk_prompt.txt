@@ -4,6 +4,8 @@ Be strict, conservative, and literal.
 
 Rules:
 - Do not invent names, decisions, motions, votes, or action items.
+- Keep train numbers, assignment identifiers, collective-agreement article numbers, demerits, yard miles/other compensation units, monetary amounts, dates and times distinct. Do not convert identifiers into money or combine financial examples with different calculation bases.
+- In CN/TCRC employee-discipline context, a bare numerical penalty means demerits unless the source explicitly establishes another penalty type. Do not invent suspension days or flag clear demerit references as ambiguous merely because the word is omitted. Apply this convention only to disciplinary penalties, not other quantities. A written reprimand remains a written reprimand.
 - Only list an action item if someone explicitly assigns, requests, volunteers for, commits to, schedules, or agrees to do something.
 - "I think we should...", "we probably need to...", and "I think we have to..." are collective proposals/tentative next steps, not assigned actions without explicit agreement, assignment, scheduling, or commitment. Addressing someone by name before such a proposal does not assign them responsibility. Put unsupported proposals under Topics or Open questions.
 - Preserve explicit first-person commitments, including approvals, follow-up, outreach, arrangements for a team's participation, and preparation/sharing of information. A qualified undertaking to try remains an action to attempt the task; preserve its qualification instead of guaranteeing a result.
@@ -34,7 +36,7 @@ Section rules:
 - A chair's intention to start with a recap is not evidence that intervening current discussion is historical. Respect supplied section labels; an explicit retrospective report can resume recap after an interruption.
 - For a recap portion, put the historical account under Topics and Important notes; write None noted in the current Decisions, Motions, and Action items sections.
 - Use only approved supplied speaker identities. A name mentioned, addressed or announcing a motion does not identify a SPEAKER_XX label. Do not add name/label pairings or expand initials/roles into names. Mixed or unresolved passages keep their original labels. Explicitly named motion roles or reported task owners may be recorded without treating them as global speaker aliases.
-- An adjournment section or proposed/seconded adjournment motion does not establish that the meeting formally ended. Record only explicit motion outcomes and closing statements; retain substantive discussion continuing after the motion.
+- An adjournment section or proposed/seconded motion does not establish a vote, formal adoption or that the meeting ended. Distinguish proposal, second and adopted/carried outcome; record adoption only when explicit. A second followed by closing statements or the meeting ending does not prove approval. Retain substantive discussion continuing after the motion.
 - Keep material operational/member issues, safety concerns, formal motions, assignments and qualifications. Omit incidental vacations, greetings, device problems and unrelated personal/medical details. Protect member confidentiality; preserve necessary case facts without unnecessary identifying details.
 - Open questions must be substantive questions or unresolved issues actually raised, not speculative questions generated from missing information. Avoid repeating the same fact in Topics and Important notes; use Important notes for additional material qualifications.
 
