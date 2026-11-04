@@ -29,8 +29,8 @@ class EditorialInstructionTests(unittest.TestCase):
         # Unequal discussion lengths: the brief dispute must still reach the
         # drafting request. These are synthetic, not benchmark/source facts.
         self.chunks = [segment(1, "[Chair] Staffing was discussed at the prior meeting.", ed.RECAP),
-                       segment(2, "[Delegate] The union disputes the overtime interpretation.\n"
-                               "[Delegate] A proposed law's effect remains uncertain.\n"
+                       segment(2, "[Taylor] The union disputes the overtime interpretation.\n"
+                               "[Taylor] A proposed law's effect remains uncertain.\n"
                                "[Chair] " + "The equipment discussion continued. " * 40),
                        segment(3, "[Chair] A motion was seconded; the outcome was not stated.", ed.ADJOURNMENT)]
         self.records = ed.source_records(self.chunks)
@@ -70,6 +70,14 @@ class EditorialInstructionTests(unittest.TestCase):
         self.assertIn("do not pad it or invent context", self.instructions)
         self.assertIn("shorter meeting may need far fewer words", self.instructions)
 
+    def test_role_comparison_chronology_and_recap_guidance_preserves_document_types(self):
+        for instruction in ("detailed minutes carry the comprehensive account separately",
+                            "do not calculate new ratios or percentages",
+                            "quantities, units, period and denominator",
+                            "the meeting chair, a local chair and an ordinary participant are different roles",
+                            "start", "audited", "100–180 words", "never truncate"):
+            self.assertIn(instruction, self.instructions)
+
     def test_synthetic_brief_topics_and_exact_references_survive_prompt_building(self):
         records, register = copy.deepcopy(self.records), copy.deepcopy(self.register)
         summaries = "A lengthy equipment report and brief overtime and legislative discussions."
@@ -105,7 +113,7 @@ class EditorialInstructionTests(unittest.TestCase):
         with self.assertRaisesRegex(ed.EditorialFailure, "invalid_notes_concern"):
             ed.validate_notes(invalid, records, "A report was discussed.")
 
-    def test_reusable_prompt_has_no_october_specific_examples_or_benchmark_dependency(self):
+    def test_reusable_prompt_has_no_historical_examples_or_benchmark_dependency(self):
         for literal in ("October", "2026", "Mac Yard", "MRS", "CAB", "Wayne", "E-test", "70%",
                         "efficiency tests", "first slot", "earlier speaking opportunity"):
             self.assertNotRegex(self.template, re.compile(re.escape(literal), re.I))

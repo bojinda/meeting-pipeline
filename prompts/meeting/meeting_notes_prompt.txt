@@ -5,6 +5,14 @@ limit: exceed it when important union business warrants the space, not through
 repetition. Never pad a short meeting or discard substantive issues to meet a
 word target. All results require operator review.
 
+Plan the member-facing body around this target before drafting. The generation
+token allowance is capacity for structured output and reasoning, not a request
+for more prose. Detailed Minutes carry the comprehensive account separately.
+Keep previous_context to a short paragraph, normally 100–180 words, selecting
+only history needed to understand current business. Do not reproduce last
+month's agenda or repeat it in the current issues. Preserve material business
+and justified exceptions; never truncate the draft or hide a substantive issue.
+
 Return JSON only with exactly: highlights, previous_context, issues, motions,
 unresolved, concerns. Each of highlights, previous_context, motions and unresolved
 is an array of blocks: {"text":"Plain prose.","source_ids":["1.1:L2"]}.
@@ -23,6 +31,12 @@ because the word is omitted. Apply this convention only to disciplinary penaltie
 not other quantities; a written reprimand remains a written reprimand. Keep
 separate financial examples and calculation bases separate; do not turn disputed
 estimates into verified totals.
+Do not calculate new ratios or percentages. Preserve each comparison's original
+quantities, units, period and denominator; a comparison with an employee's pay
+must not become a comparison with the employer's cost including benefits.
+Keep the date a practice started distinct from when it was discovered, audited
+or investigated. If the event/date relationship is unclear, qualify it and put
+the ambiguity with exact source IDs in private concerns.
 Split claims when they need distinct support. If support is uncertain, qualify
 the text and flag source_conflict or incomplete_coverage for operator review.
 Oversized omitted lines are explicit evidence gaps, never verified support.
@@ -60,7 +74,7 @@ sections or an undertaking section without confirmed undertakings. Unapproved
 candidates remain private, as specified above.
 Prioritize substantive union business: collective-agreement disputes and their
 actual status, health and safety, legislative developments, grievances, motions
-and unresolved operational problems. Preserve reported paid grievance outcomes
+and unresolved operational problems. Preserve source-supported paid grievance outcomes
 and successful claims, material penalties and the union's response, and hazards'
 practical significance: company actions, union objections and proposed remedies.
 Cover material topics even when discussed briefly; discussion time or
@@ -106,6 +120,13 @@ Write natural reporting, not commentary about the summarization or verification
 process. Use approved names or supported roles only; use generic participant
 attribution when identity is uncertain. Never infer identity from nearby names,
 attendance or a mixed speaker label, or print internal speaker IDs.
+The meeting chair, a local chair and an ordinary participant are different roles.
+Opening a discussion, speaking often or addressing a named person does not
+identify the presiding officer. Use a participant unless this exact attribution
+has explicit source support; record unresolved role claims in private concerns.
+When a paragraph describes alleged misconduct or false information, preserve
+reported or alleged status for every disputed claim, including causal clauses.
+Do not let an initially qualified account become an unqualified conclusion.
 
 Distinguish recorded motions, supported decisions, reported work, tentative
 proposals and unresolved matters. State a motion's recorded disposition only

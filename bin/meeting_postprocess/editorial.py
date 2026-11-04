@@ -21,6 +21,7 @@ from .qa import check_minutes, write_report
 from .rendering import insert_recap, strip_chunk_references
 from .sections import BUSINESS, ADJOURNMENT, RECAP
 from .speaker_suggestions import write_private_json
+from .editorial_quality import TRACE, review_quality, source_review
 
 
 REGISTER = "action-register.private.json"
@@ -803,7 +804,7 @@ def review_groups(register, notes, flags, records):
             group = "substantive_conflicts" if public else "private_background"
         else:
             group = "member_content" if public else "private_background"
-        entry = {**flag, "instruction": instructions.get(code, "Review the cited source, wording, status and publication relevance before release.")}
+        entry = {**flag, "instruction": flag.get("instruction", instructions.get(code, "Review the cited source, wording, status and publication relevance before release."))}
         if code == "excluded_action_review":
             entry["instruction"] += f" Exclusion: {flag['reason']}; original audit: {flag['original_outcome']}."
         if item:
@@ -831,10 +832,11 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
     document = render_notes(notes, register)
     checklist = ["# Private Operator Review", "", "Review hold — no publication authorization.", "",
                  "Source-ID and lexical checks do not certify factual accuracy. Review every material claim against its source.",
+                 f"Readable claim/source review: [{TRACE}]({TRACE}).",
                  f"Complete provenance: [{REGISTER}]({REGISTER}) and [{NOTES_EVIDENCE}]({NOTES_EVIDENCE}).", ""]
     flags = register["findings"] + notes_concern_findings(notes) + notes.get("reference_findings", [])
-    if not 1800 <= len(document.split()) <= 2400:
-        flags.append({"code": "length_review"})
+    quality, quality_flags = review_quality(notes, records, document)
+    flags += quality_flags
     flags += [{"code": f.code} for f in findings]
     flags += [{"code": f.code} for f in check_minutes(document, source)]
     for location, block in notes_blocks(notes):
@@ -861,12 +863,13 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
             if entry["code"] == "notes_source_section_review":
                 checklist += [f"  Notes block: {entry['notes_location']}; mismatched sources: {', '.join(entry['mismatched_source_ids'])}."]
             if "evidence_pointer" in entry:
-                checklist += [f"  Evidence: {entry['evidence_pointer']}; local candidate: {', '.join(entry.get('local_source_ids', [])) or 'none'}."]
+                pointer = entry['evidence_pointer']
+                checklist += [f"  Evidence: [{pointer}]({pointer}); local candidate: {', '.join(entry.get('local_source_ids', [])) or 'none'}."]
             if "operator_detail" in entry:
                 checklist += ["  Private review detail: " + " / ".join(entry["operator_detail"])]
         checklist += [""]
     review = {"status": "review_hold", "source_hash": register["source_hash"], "register_hash": digest(register),
-              "notes_word_count": len(document.split()), "findings": flags, "review_groups": groups,
+              "notes_word_count": len(document.split()), "notes_quality": quality, "findings": flags, "review_groups": groups,
               "required": ["meeting_date", "owner_verification", "semantic_fact_review", "confidentiality", "distribution_authority"]}
     assessment = register.get("original_assessment")
     if assessment is not None:
@@ -883,6 +886,7 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
                                     "semantic_completeness": "requires_operator_review"}})
     write_private_json(directory / REGISTER, register)
     write_private_json(directory / REVIEW, review)
+    private_text(directory / TRACE, source_review(notes, records, register["source_hash"]))
     private_text(directory / CHECKLIST, "\n".join(checklist) + "\n")
     internal = ["# Private Canonical Action Register", "", "Operator review required; source references are private.", ""]
     for key, heading in CATEGORIES.items():

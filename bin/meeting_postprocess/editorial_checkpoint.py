@@ -51,7 +51,7 @@ def code_identity(engine):
     return {**{name: file_hash(ROOT / f"bin/meeting_postprocess/{name}.py") for name in MAP_CODE},
             **{name: file_hash(ROOT / "prompts/meeting" / name) for name in ("chunk_prompt.txt", "chunk_system.txt")},
             "map_prompt_builder": sha((inspect.getsource(engine.SafeDict) + inspect.getsource(engine.load_template) + inspect.getsource(engine.build_chunk_prompt)).encode()),
-            "map_postprocessing": sha(map_body(Path(engine.__file__).read_text()).encode())}
+            "map_postprocessing": sha(map_body(Path(engine.__file__).read_text(encoding="utf-8")).encode())}
 
 
 def map_body(text):
@@ -111,7 +111,7 @@ def request_hashes(engine, args, map_sources, prompts, chunk_plan):
             prompt += DETAILS
             options["num_predict"] = chunk_plan["settings"]["map_output"]
         hashes.append(digest({"model": args.map_model, "prompt": prompt,
-                              "system": (prompts / "chunk_system.txt").read_text().strip(),
+                              "system": (prompts / "chunk_system.txt").read_text(encoding="utf-8").strip(),
                               "stream": False, "keep_alive": args.keep_alive, "options": options}))
     return hashes
 
@@ -162,14 +162,14 @@ def verify_legacy(directory, args, engine, chunks, map_sources, bindings, prompt
         if inspect.getsource(function).strip() not in original_engine.replace("\r\n", "\n"):
             raise EditorialFailure("checkpoint_original_map_prompt_changed")
     # Protect against changed map postprocessing as well as changed prompts.
-    current_engine = Path(engine.__file__).read_text()
+    current_engine = Path(engine.__file__).read_text(encoding="utf-8")
     if map_body(original_engine) != map_body(current_engine):
         raise EditorialFailure("checkpoint_original_map_processing_changed")
     maps = engine.load_jsonl(directory / "chunk_summaries.jsonl")
     if engine.load_jsonl(directory / "meeting_sections.jsonl") != chunks:
         raise EditorialFailure("checkpoint_original_preparation_changed")
     from .redaction import PRIVATE_REDACTION_FILENAME
-    if json.loads((directory / PRIVATE_REDACTION_FILENAME).read_text()) != json.loads((args.meeting_notes_output_dir / PRIVATE_REDACTION_FILENAME).read_text()):
+    if json.loads((directory / PRIVATE_REDACTION_FILENAME).read_text(encoding="utf-8")) != json.loads((args.meeting_notes_output_dir / PRIVATE_REDACTION_FILENAME).read_text(encoding="utf-8")):
         raise EditorialFailure("checkpoint_redactions_changed")
     validate_maps(chunks, map_sources, maps)
     stage = json.loads(stage_data)

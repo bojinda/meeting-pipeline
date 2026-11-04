@@ -1,0 +1,6 @@
+[
+  {"claim":"The presiding officer said the rule was clear.","source":"[SPEAKER_02] That rule seems clear to me.","expected":"role_attribution_review"},
+  {"claim":"The company provided false information and the case went to review.","source":"[SPEAKER_02] We allege that the company supplied false information; it is disputed.","expected":"allegation_status_review"},
+  {"claim":"Costs were three times higher, including benefits.","source":"[SPEAKER_02] The first figure concerns wages. The second includes benefits; they are different bases.","expected":"numerical_basis_review"},
+  {"claim":"The audit started in 2018.","source":"[SPEAKER_02] The practice started in 2018. We discovered it last week; the audit began yesterday.","expected":"chronology_review"}
+]

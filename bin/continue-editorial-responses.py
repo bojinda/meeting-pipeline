@@ -27,7 +27,7 @@ def main():
         managed,snapshot=approved_input(role,path)
         need(managed and snapshot is not None,'completion_snapshot_missing')
         return Path(snapshot)
-    manifest=json.loads(selected('completion_manifest',args.manifest).read_text())
+    manifest=json.loads(selected('completion_manifest',args.manifest).read_text(encoding='utf-8'))
     need(not args.output.exists(),'fresh_completion_output_required')
     data={}
     for role,item in manifest['files'].items():
@@ -54,7 +54,7 @@ def main():
     config=record['configuration'];tokenizer=selected('editorial_tokenizer',manifest['tokenizer'])
     need(sha(tokenizer.read_bytes())==config['tokenizer_sha256'],'completion_tokenizer_changed')
     prompts=cp.StagePrompts(Path(__file__).resolve().parents[1]/'prompts/meeting')
-    system=(prompts/'reduce_system.txt').read_text().strip()
+    system=(prompts/'reduce_system.txt').read_text(encoding='utf-8').strip()
     diagnostics=json.loads(data['completion_diagnostics'])['requests']
     need([r['stage'] for r in diagnostics]==['register','notes'],'completion_diagnostics_incomplete')
     source='\n'.join(c['text'] for c in chunks if c['meeting_section'] in {ed.BUSINESS,ed.ADJOURNMENT})
