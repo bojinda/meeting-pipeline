@@ -27,8 +27,11 @@ class EditorialNativeStageTests(unittest.TestCase):
     def launch(self, output, *, checkpoint=None, empty=False):
         environment = dict(self.environment, MEETING_FAKE_EDITORIAL_REGISTER_EMPTY="1" if empty else "0")
         tokenizer = self.root / "synthetic-tokenizer.json"
-        tokenizer.write_text("Synthetic offline counter only")
-        options = ["--meeting-notes", "--meeting-notes-output-dir", str(output), "--meeting-notes-tokenizer", str(tokenizer),
+        from tokenizers import Tokenizer, models, pre_tokenizers
+        counter = Tokenizer(models.WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
+        counter.pre_tokenizer = pre_tokenizers.Whitespace()
+        counter.save(str(tokenizer))
+        options = ["--meeting-notes", "--no-meeting-notes-only", "--meeting-notes-output-dir", str(output), "--meeting-notes-tokenizer", str(tokenizer),
                    "--reduce-num-ctx", "98304", "--map-num-ctx", "32768", "--no-keep-recap"]
         if checkpoint:
             options += ["--meeting-notes-checkpoint", str(checkpoint), "--meeting-notes-checkpoint-sha256", hashlib.sha256(checkpoint.read_bytes()).hexdigest()]

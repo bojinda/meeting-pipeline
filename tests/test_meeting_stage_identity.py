@@ -21,6 +21,7 @@ from aihub_gpu_runner.host_stage import command_identity, capture_input_files, H
 from aihub_gpu_runner.config import load_config
 from aihub_gpu_runner.core import NativeLock
 from gpu_admission_fixture import configure
+from runner_transport_fixture import configure_transport
 
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'Native Linux runner-managed meeting stages')
@@ -47,6 +48,7 @@ class MeetingStageIdentityTests(unittest.TestCase):
             OLLAMA_URL='http://127.0.0.1:1', MEETING_MAP_MODEL='synthetic', MEETING_REDUCE_MODEL='synthetic',
             MEETING_SUMMARIES_ROOT=str(self.root / 'comparison-output'), MEETING_KEEP_RECAP='1')
         self.controller = configure(self.root, self.environment)
+        configure_transport(self.root, self.environment)
         self.output = self.root / 'comparison-output' / self.transcript.name
         self.log = self.root / 'requests.synthetic.jsonl'
         self.environment.update(MEETING_FAKE_OLLAMA_LOG=str(self.log),

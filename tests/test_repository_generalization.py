@@ -122,7 +122,7 @@ class RepositoryGeneralizationTests(unittest.TestCase):
 
     def test_public_gpu_configuration_defaults_are_logical_resources(self):
         settings = (ROOT / "config" / ".env.example").read_text(encoding="utf-8")
-        for setting in ("AIHUB_GPU0_LOCK_FILE=/tmp/aihub-gpu0.lock", "AIHUB_GPU1_LOCK_FILE=/tmp/aihub-gpu1.lock", "AIHUB_GPU_LOCK_TIMEOUT=3600", "WHISPERX_DEVICE_INDEX=0", "WHISPERX_DEVICE=cuda"):
+        for setting in ("AIHUB_GPU0_LOCK_FILE=", "AIHUB_GPU1_LOCK_FILE=", "AIHUB_GPU_LOCK_TIMEOUT=3600", "WHISPERX_DEVICE_INDEX=0", "WHISPERX_DEVICE=cuda", "DELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION=0"):
             self.assertIn(setting, settings.splitlines())
 
     def test_optional_private_identifier_audit(self):

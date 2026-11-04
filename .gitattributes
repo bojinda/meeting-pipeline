@@ -1,0 +1,8 @@
+# Reproducible source hashes and Linux launchers on Windows and Linux checkouts.
+* text=auto eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.example text eol=lf

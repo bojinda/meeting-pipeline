@@ -270,15 +270,15 @@ when no context is configured). Lesson mode ignores these meeting overrides.
 - `MEETING_CONTROL_LOG`
 
 ### Source-audio cleanup
-Suggested settings:
+The production retention policy preserves original recordings:
 
-- `DELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION=1`
-- `DELETE_SOURCE_AUDIO_ONLY_ON_SUCCESS=1`
+- `DELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION=0`
 
-Recommended behavior:
-- delete source audio only after WhisperX has successfully produced the transcript outputs you need
-- keep the transcript, chunked transcript, and summary artifacts
-- do **not** delete logged audio before successful transcription completes
+Keep the original WAV, transcripts, chunks, original model responses and private
+review artifacts. A successful transcription or summary does not authorize audio
+deletion. The wrappers default to retention; explicitly setting the deletion flag
+to `1` enables a separate opt-in cleanup policy. There is no
+`DELETE_SOURCE_AUDIO_ONLY_ON_SUCCESS` setting in these wrappers.
 
 ---
 
@@ -365,8 +365,10 @@ WhisperX and chunking run first. The summary step then calls the existing
 speaker selection, prompts for approval or a publishing action.
 
 The completed private draft is saved at
-`ignore/meeting-notes/<meeting>.XXXXXX/notes/meeting-notes-draft.md` (or under
-`MEETING_NOTES_ROOT`). Its exact location and either **Draft ready**, **Draft ready
+`meeting-summaries/<meeting>.XXXXXX/meeting-notes-draft.md` (under
+`MEETING_SUMMARIES_ROOT`, or the optional `MEETING_NOTES_ROOT` override). All
+private editorial evidence is alongside the draft, without a `notes/` subdirectory.
+Its exact location and either **Draft ready**, **Draft ready
 with review warnings**, or **No usable draft** appear in that transcript's
 `status.txt` and private `whisperx.log`. A new run preserves earlier drafts.
 Names and editorial corrections can be reviewed afterward in the Markdown file.
@@ -388,25 +390,26 @@ storage/tokenizer settings. Speaker approvals remain optional.
 
 The following logical two-GPU configuration is an example:
 
-| Logical resource | Pipeline stage | Default shared lock file |
+| Logical resource | Pipeline stage | Physical lock |
 | --- | --- | --- |
-| GPU 0 | WhisperX | `/tmp/aihub-gpu0.lock` |
-| GPU 1 | Ollama, all map/reduce calls | `/tmp/aihub-gpu1.lock` |
+| GPU 0 | WhisperX | Existing runner configuration: `lock_paths.gpu0` |
+| GPU 1 | Normal Ollama map/reduce | Existing runner configuration: `lock_paths.gpu1` |
+| GPU 0 + GPU 1 | Authorized dual-target meeting summaries | Both existing configured locks |
 
 These are logical cooperative resource locks. Installations may use UUID-derived
 or otherwise stable paths, but every workload sharing a physical GPU must use
 the same configured path/inode. A lock filename has no special relationship to
 CUDA and does not assign a workload to a device. Explicit `AIHUB_GPU0_LOCK_FILE`
-and `AIHUB_GPU1_LOCK_FILE` environment settings override the generic defaults,
-so existing installations keep their configured resource paths. Other workloads
+and `AIHUB_GPU1_LOCK_FILE` settings, if supplied, must match the runner's configured
+paths. Leave them empty to use those existing paths. Other workloads
 can adopt those same configured locks. The pipeline does not set GPU visibility
 variables or reconfigure the Ollama server.
 
 Configure the shared resources in `config/.env`:
 
 ```env
-AIHUB_GPU0_LOCK_FILE=/tmp/aihub-gpu0.lock
-AIHUB_GPU1_LOCK_FILE=/tmp/aihub-gpu1.lock
+AIHUB_GPU0_LOCK_FILE=
+AIHUB_GPU1_LOCK_FILE=
 AIHUB_GPU_LOCK_TIMEOUT=3600
 WHISPERX_DEVICE=cuda
 WHISPERX_DEVICE_INDEX=0
@@ -422,8 +425,8 @@ still require approved live calibration before deployment.
 `bin/with-gpu-lock.sh` requires `AIHUB_GPU_RUNNER_CONFIG`, a Python 3.11+ runner
 interpreter (`AIHUB_GPU_RUNNER_PYTHON`) and the canonical SDK in the child summary
 environment. Its trusted config must share the runner's journal, scope and
-original physical lock paths; the `/tmp` names above are examples, not permission
-to replace production locks. Missing config/package or mismatched locks fails
+original physical lock paths. Never replace or unlink production locks to
+synchronize code. Missing config/package or mismatched locks fails
 closed. No standalone flock or direct HTTP fallback is used in managed stages.
 `AIHUB_GPU_LOCK_TIMEOUT` limits admission waiting, not runtime; timeout returns 75.
 The helper retains signal/exit handling and the HA start/stop interface.
@@ -1301,14 +1304,20 @@ uses the model's default-on behavior. Explicit CLI output/model/context/tokenize
 and `--meeting-notes-thinking` overrides remain supported. No checkpoint or
 operator-supplied hash is required for an ordinary run.
 
-The destination must be new and outside transcript/production output directories.
+The wrapper reserves a unique private `<meeting>.XXXXXX` run directly under the
+summary root. Existing legacy summaries and previous runs are preserved. Only
+empty private session-run reservations are accepted there; arbitrary destinations
+inside legacy outputs remain rejected. Explicit new destinations outside the
+transcript and summary roots remain supported. Historical directories are not moved.
 The existing GPU stage, selected models, context settings, maps, approved speaker
 corrections and redactions are reused. The three existing reductions become the
 private action register, member notes, and detailed minutes; optional recap still
 uses its existing reduction when requested. Ordinary wrapper notes runs stop
 after the private register and notes reductions; no detailed-minutes or separate
 recap generation is needed. Previous-meeting context still comes from the mapped
-source. Pass `--no-meeting-notes-only` explicitly to request the additional
+source. The automated `postprocess-meeting.sh` path explicitly uses
+`--meeting-notes --no-meeting-notes-only` and produces all document types.
+For manual runs, pass `--no-meeting-notes-only` explicitly to request the additional
 documents; `--keep-recap` controls the separate recap for that full-output mode.
 There is no additional LLM extraction layer. An
 existing validated chunk plan may be passed with `--chunk-plan` and its tokenizer;
@@ -1368,7 +1377,7 @@ Editorial mode requires a matching local `tokenizer.json` via
 `tokenizers` package, and an explicitly configured reduce context. No tokenizer
 is downloaded. Every reduction counts its complete prompt/system text, disables
 saved tokenizer truncation/padding, reserves 1,024 framing tokens and output
-capacity (notes: 49,152; register/detailed: 16,384; optional recap: 8,192), and refuses
+capacity (notes: 49,152; register: 16,384; detailed: 32,768; optional recap: 8,192), and refuses
 over-budget requests before generation. The output reserve is also the request's
 generation limit. No prompt is silently truncated or GPU allocation changed.
 Measurements are retained in `editorial-budgets.private.json`.

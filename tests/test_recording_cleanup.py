@@ -34,6 +34,8 @@ class MeetingRecordingCleanupTests(unittest.TestCase):
         (binary / "postprocess-meeting.sh").write_text(script)
         (binary / "with-gpu-lock.sh").write_text((ROOT / "bin" / "with-gpu-lock.sh").read_text())
         (binary / "meeting_stage_inputs.py").write_text((ROOT / "bin/meeting_stage_inputs.py").read_text())
+        # Audio-policy test stops at the summary boundary; no model work.
+        (binary / "summarize-existing-meeting.sh").write_text("#!/bin/sh\nexit 0\n")
         worker = '''#!/usr/bin/env python3
 import os,pathlib,sys
 args=sys.argv[1:]

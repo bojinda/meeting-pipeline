@@ -257,6 +257,11 @@ class PipelineGPUStageTests(unittest.TestCase):
         self.processes = []
         (self.binary / "with-gpu-lock.sh").write_text(HELPER.read_text())
         (self.binary / "meeting_stage_inputs.py").write_text((ROOT / "bin/meeting_stage_inputs.py").read_text())
+        # Exercise single-resource scheduling here. The full notes workflow
+        # separately verifies the production dual-target command vector.
+        (self.binary / "summarize-existing-meeting.sh").write_text(
+            'source "$(dirname "$0")/with-gpu-lock.sh"\n'
+            'aihub_run_gpu_stage gpu1 fixture "$AIHUB_GPU_RUNNER_PYTHON" "$(dirname "$0")/ollama_meeting_summary.py" "$1"\n')
         for profile in ("meeting", "lesson"):
             original = (ROOT / "bin" / f"postprocess-{profile}.sh").read_text()
             # Only relocate the existing machine-specific paths into fixtures;
@@ -267,7 +272,7 @@ class PipelineGPUStageTests(unittest.TestCase):
         worker = '''#!/usr/bin/env python3
 import fcntl,json,os,pathlib,sys,time
 name=pathlib.Path(sys.argv[0]).name
-args=sys.argv[1:]
+args=([sys.argv[0]] if name.startswith('ollama_') else [])+sys.argv[1:]
 if name=='whisperx':
     recording=pathlib.Path(args[0]); profile='lesson' if 'lesson' in recording.name else 'meeting'; stage='whisper'; gpu=0
 elif args and 'transcript_chunker.py' in args[0]:
@@ -296,6 +301,8 @@ sys.exit(int(os.environ.get('GPU_TEST_'+stage.upper()+'_EXIT','0')))
             path = self.binary / name
             path.write_text(worker)
             path.chmod(0o755)
+        for name in ("ollama_meeting_summary.py", "ollama_lesson_summary.py"):
+            (self.binary / name).write_text(worker)
 
     def tearDown(self):
         for path in self.root.glob("*-hold"):
@@ -383,7 +390,7 @@ sys.exit(int(os.environ.get('GPU_TEST_'+stage.upper()+'_EXIT','0')))
 
     def test_ollama_failure_releases_lock_and_preserves_existing_exit_behavior(self):
         self.environment["GPU_TEST_OLLAMA_EXIT"] = "23"
-        for profile, expected in (("meeting", 0), ("lesson", 1)):
+        for profile, expected in (("meeting", 23), ("lesson", 1)):
             process = self.start_pipeline(profile)
             process.communicate(timeout=5)
             self.assertEqual(process.returncode, expected)

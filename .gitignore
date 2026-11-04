@@ -1,8 +1,8 @@
 
-`.gitignore`
-```gitignore
 # Environment / secrets
 .env
+.env.*
+!.env.example
 config/.env
 config/*.local
 systemd/meeting-capture.service
@@ -80,3 +80,31 @@ operator-review.private.md
 editorial-response.private.json
 notes-evidence.private.json
 editorial-budgets.private.json
+*.private.json
+*.private.md
+editorial-generation.private.json
+editorial-map-checkpoint.private.json
+completion-provenance.private.json
+notes-source-review.private.md
+meeting-notes-draft.md
+meeting_sections.jsonl
+chunk_summaries.jsonl
+transcript_chunks.jsonl
+transcript_chunks.csv
+lesson-recordings/
+lesson-transcripts/
+lesson-summaries/
+lesson-state/
+
+# Separate repositories, generated packages and historical operational evidence
+/runner-*/
+/dashboard-reliability-*/
+/incident-*/
+/aihub-recovery-before/
+/aihub-recovery-work/
+/aihub-recovery-baseline.patch
+/deliver_aihub_recovery.py
+*.whl
+dist/
+build/
+*.egg-info/
