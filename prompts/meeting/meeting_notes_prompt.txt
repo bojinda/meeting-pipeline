@@ -9,9 +9,10 @@ Return JSON only with exactly: highlights, previous_context, issues, motions,
 unresolved, concerns. Each of highlights, previous_context, motions and unresolved
 is an array of blocks: {"text":"Plain prose.","source_ids":["1.1:L2"]}.
 issues is an ordered array of {"heading":"Substantive issue","paragraphs":[blocks]}.
-Source IDs must come from the supplied exact source_excerpts. Prefer small local
-consecutive ranges (at most three lines / 1,800 characters), in supplied source
-order. Cite the actual passage supporting each claim, not words scattered across
+Source IDs must come from the supplied exact source_excerpts. Write each line ID
+as a separate array element, for example ["4:L5","4:L6","4:L7"], rather than a
+compact range such as "4:L5-L7". Prefer at most three local consecutive lines /
+1,800 characters, in supplied source order. Cite the actual passage supporting each claim, not words scattered across
 unrelated evidence.
 Keep train numbers, assignment identifiers, collective-agreement article numbers,
 demerits, yard miles/other compensation units, monetary amounts, dates and times

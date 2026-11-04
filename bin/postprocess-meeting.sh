@@ -115,7 +115,7 @@ if AIHUB_GPU_STAGE_INPUT="$INPUT" AIHUB_GPU_STAGE_SETTINGS_FILE="$CONFIG_FILE" a
   fi
 
   if [ -f "$OUTDIR/chunks_out/transcript_chunks.jsonl" ]; then
-    NOTES_OPTIONS=(--meeting-notes)
+    NOTES_OPTIONS=(--meeting-notes --no-meeting-notes-only)
     if [ -n "${MEETING_NOTES_DUAL_GPU_TARGET:-meeting-dual}" ]; then
       NOTES_OPTIONS+=(--dual-gpu-target "${MEETING_NOTES_DUAL_GPU_TARGET:-meeting-dual}")
     fi

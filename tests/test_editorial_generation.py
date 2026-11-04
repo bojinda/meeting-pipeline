@@ -191,7 +191,7 @@ class EditorialContinuationTests(unittest.TestCase):
         with patch.dict(sys.modules, modules):
             self.assertEqual(self.run_main(self.continuation_argv(original, out), env), 0)
         self.assertEqual(len(self.payloads), 3)
-        self.assertEqual([p["options"]["num_predict"] for p in self.payloads], [16384, 49152, 16384])
+        self.assertEqual([p["options"]["num_predict"] for p in self.payloads], [16384, 49152, 32768])
         self.assertFalse(any("Transcript chunk:" in p["prompt"] for p in self.payloads))
         self.assertIn("The model generated", (out / "meeting-notes-draft.md").read_text())
         self.assertEqual({p.name: p.read_bytes() for p in original.iterdir() if p.is_file()}, before)

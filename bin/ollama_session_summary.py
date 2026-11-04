@@ -340,8 +340,19 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         source = args.transcript_dir.resolve()
         target = args.meeting_notes_output_dir.resolve()
         production = Path(os.environ.get("MEETING_SUMMARIES_ROOT", str(Path(__file__).resolve().parents[1] / "meeting-summaries"))).resolve()
-        if target.exists() or target.is_relative_to(source) or source.is_relative_to(target) or target.is_relative_to(production) or production.is_relative_to(target):
-            parser.error("Editorial destination must be new and outside source/production outputs")
+        notes_root = Path(os.environ.get("MEETING_NOTES_ROOT") or str(production)).expanduser().resolve()
+        # The wrapper reserves a private, empty mktemp directory. Only that
+        # per-session namespace may share the legacy summary root; never reuse
+        # populated runs, legacy meeting directories or their descendants.
+        run_destination = target.parent in {production, notes_root} and re.fullmatch(
+            re.escape(source.name) + r"\.[A-Za-z0-9]{6}", target.name) is not None
+        empty_reservation = run_destination and target.is_dir() and not any(target.iterdir()) and (
+            os.name == "nt" or target.stat().st_mode & 0o777 == 0o700)
+        if (args.meeting_notes_output_dir.is_symlink() or target.exists() and not empty_reservation
+                or target.is_relative_to(source) or source.is_relative_to(target)
+                or target.is_relative_to(production) and not (run_destination and target.parent == production)
+                or production.is_relative_to(target)):
+            parser.error("Editorial destination must be new, or an empty private session run; outside source and legacy outputs")
         origin = checkpoint.parent.resolve() if checkpoint else seal_maps.resolve() if seal_maps else None
         if origin and (target.is_relative_to(origin) or origin.is_relative_to(target)):
             parser.error("Checkpoint destination must be outside preserved checkpoint artifacts")
@@ -377,7 +388,7 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
         source = args.transcript_dir.resolve()
         target = (args.chunk_comparison_dir or args.meeting_notes_output_dir).resolve()
         production = Path(os.environ.get("MEETING_SUMMARIES_ROOT", str(Path(__file__).resolve().parents[1] / "meeting-summaries"))).resolve()
-        if target.exists() or target.is_relative_to(source) or source.is_relative_to(target) or target.is_relative_to(production) or production.is_relative_to(target):
+        if not args.meeting_notes and (target.exists() or target.is_relative_to(source) or source.is_relative_to(target) or target.is_relative_to(production) or production.is_relative_to(target)):
             parser.error("Chunk comparison destination must be new and outside source/production outputs")
         _summary_dir = target
 

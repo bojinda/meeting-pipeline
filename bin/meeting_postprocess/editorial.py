@@ -32,7 +32,7 @@ NOTES_EVIDENCE = "notes-evidence.private.json"
 BUDGETS = "editorial-budgets.private.json"
 DIAGNOSTICS = "editorial-generation.private.json"
 FRAMING = 1024
-OUTPUT_TOKENS = {"register": 16384, "notes": 49152, "detailed": 16384, "recap": 8192}
+OUTPUT_TOKENS = {"register": 16384, "notes": 49152, "detailed": 32768, "recap": 8192}
 LOCAL_LINES = 3
 LOCAL_CHARS = 1800
 CATEGORIES = {
@@ -557,6 +557,75 @@ def _plain(text, *, identity_review=False):
     return text.strip()
 
 
+def expand_notes_references(ids, records):
+    """Parse compact same-chunk ranges; every exact supplied line stays required."""
+    if not isinstance(ids, list) or not ids or any(not isinstance(i, str) for i in ids):
+        raise EditorialFailure("invalid_source_references")
+    expanded = []
+    for key in ids:
+        if key in records:
+            expanded.append(key)
+            continue
+        match = re.fullmatch(r"(\d+(?:\.\d+)?):L([1-9]\d*)-L([1-9]\d*)", key)
+        if not match:
+            raise EditorialFailure("invalid_source_references")
+        chunk, first, last = match.groups()
+        first, last = int(first), int(last)
+        if last < first or last - first + 1 > len(records):
+            raise EditorialFailure("invalid_source_references")
+        lines = [f"{chunk}:L{number}" for number in range(first, last + 1)]
+        if any(line not in records for line in lines):
+            raise EditorialFailure("invalid_source_references")
+        expanded.extend(lines)
+    # Overlaps and duplicate entries remain errors, including range/single mixes.
+    if len(expanded) != len(set(expanded)):
+        raise EditorialFailure("invalid_source_references")
+    return expanded
+
+
+def triage_notes(raw):
+    """Withhold sensitive prose from the notes view; retain it for private review.
+
+    This never overrides _plain or approves text. The resulting view must still
+    pass every schema, citation and current-business check in validate_notes.
+    """
+    selected = deepcopy(raw)
+    withheld = []
+    if not isinstance(selected, dict) or not isinstance(selected.get("concerns"), list):
+        return selected, withheld
+    def keep(block, location):
+        if not isinstance(block, dict) or set(block) != {"text", "source_ids"}:
+            return True  # Existing validation owns malformed inputs.
+        try:
+            _plain(block["text"], identity_review=True)
+        except EditorialFailure as exc:
+            if str(exc) != "confidential_notes_content":
+                return True
+            selected["concerns"].append({"category": "confidentiality", "text": block["text"],
+                                         "source_ids": deepcopy(block["source_ids"])})
+            withheld.append({"code": "notes_confidential_block_withheld", "notes_location": location,
+                             "source_ids": deepcopy(block["source_ids"]),
+                             "evidence_pointer": f"{RESPONSE}#/responses/notes",
+                             "private_concern_index": len(selected["concerns"]) - 1})
+            return False
+        return True
+    for key in ("highlights", "previous_context", "motions", "unresolved"):
+        if isinstance(selected.get(key), list):
+            selected[key] = [block for i, block in enumerate(selected[key]) if keep(block, f"{key}/{i}")]
+    if isinstance(selected.get("issues"), list):
+        issues = []
+        for i, issue in enumerate(selected["issues"]):
+            if isinstance(issue, dict) and isinstance(issue.get("paragraphs"), list) and issue["paragraphs"]:
+                issue["paragraphs"] = [block for n, block in enumerate(issue["paragraphs"]) if keep(block, f"issues/{i}/paragraphs/{n}")]
+                if not issue["paragraphs"]:
+                    continue
+            issues.append(issue)
+        selected["issues"] = issues
+    if not selected.get('issues') and raw.get('issues') and withheld:
+        return deepcopy(raw), []  # Preserve the original all-sensitive hard refusal.
+    return selected, withheld
+
+
 def validate_notes(raw, records, source, *, reference_changes=None):
     if not _object(raw, "highlights previous_context issues motions unresolved concerns"):
         raise EditorialFailure("invalid_notes_schema")
@@ -567,7 +636,12 @@ def validate_notes(raw, records, source, *, reference_changes=None):
         # Existing meeting IDs are required. Previous/current labels can be
         # ambiguous across mixed passages: retain that disagreement for review,
         # without relabelling evidence or claiming the citation is supported.
+        original_ids = ids
+        ids = expand_notes_references(ids, records)
         refs = _refs(ids, records, recap=True, sections={RECAP, BUSINESS, ADJOURNMENT}, canonical=True)
+        if original_ids != ids:
+            changes.append({"code": "notes_reference_range_expanded", "notes_location": location,
+                            "original_source_ids": list(original_ids), "expanded_source_ids": list(ids)})
         mismatched = [key for key in ids if records[key]["section"] not in sections]
         if mismatched:
             changes.append({"code": "notes_source_section_review", "validation_finding": "invalid_source_references",
@@ -876,6 +950,8 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
             proposed_notes = json.loads(raw["notes"])
         except json.JSONDecodeError:
             raise EditorialFailure("editorial_notes_invalid_json") from None
+        proposed_notes, withheld_notes = triage_notes(proposed_notes)
+        reference_changes.extend(withheld_notes)
         try:
             notes = validate_notes(proposed_notes, visible, source, reference_changes=reference_changes)
         finally:

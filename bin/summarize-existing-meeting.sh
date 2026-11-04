@@ -64,10 +64,10 @@ if [ "$NOTES" = 1 ]; then
   fi
   if [ "$NOTES_MODE_SET" = 0 ]; then SUMMARY_OPTIONS+=(--meeting-notes-only); fi
   if [ "$NOTES_OUTPUT_SET" = 0 ]; then
-    NOTES_ROOT="${MEETING_NOTES_ROOT:-$BASE_DIR/ignore/meeting-notes}"
+    NOTES_ROOT="${MEETING_NOTES_ROOT:-${MEETING_SUMMARIES_ROOT:-$BASE_DIR/meeting-summaries}}"
     mkdir -p "$NOTES_ROOT"
     NOTES_RUN="$(mktemp -d "$NOTES_ROOT/$(basename "$TRANSCRIPT_DIR").XXXXXX")"
-    SUMMARY_OPTIONS+=(--meeting-notes-output-dir "$NOTES_RUN/notes")
+    SUMMARY_OPTIONS+=(--meeting-notes-output-dir "$NOTES_RUN")
   fi
 fi
 SUMMARY_RESOURCE=gpu1
