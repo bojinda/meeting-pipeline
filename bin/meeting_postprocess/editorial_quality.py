@@ -26,8 +26,15 @@ def review_quality(notes, records, document):
     count = len(document.split())
     recap = sum(len(b["text"].split()) for b in notes["previous_context"])
     substantial = sum(len(r["text"].split()) for r in records.values()) >= 4000
+    section_words = {section: sum(len(b["text"].split()) for b in notes[section])
+                     for section in ("highlights", "previous_context", "motions", "unresolved")}
+    issue_sizes = [{"notes_location": f"issues/{i}", "word_count": sum(len(b["text"].split()) for b in issue["paragraphs"]),
+                    "paragraph_count": len(issue["paragraphs"])} for i, issue in enumerate(notes["issues"])]
+    section_words["issues"] = sum(row["word_count"] for row in issue_sizes)
     metrics = {"document_words": count, "previous_context_words": recap,
                "target_words": [1800, 2400], "substantial_source": substantial,
+               "member_prose_words": sum(section_words.values()), "section_words": section_words,
+               "issues": issue_sizes,
                "automatic_revision": False}
     if count > 2400 or (substantial and count < 1800):
         flags.append({"code": "length_review", "word_count": count,
@@ -35,6 +42,22 @@ def review_quality(notes, records, document):
     if recap > 180 or recap > max(80, count * .15):
         flags.append({"code": "previous_context_length_review", "word_count": recap,
                       "instruction": "Review the recap for relevance to current business; retain necessary context and preserve the full source. " + REVISION})
+    for section in ("highlights", "unresolved"):
+        if section_words[section] > 120:
+            flags.append({"code": "notes_section_length_review", "notes_location": section,
+                          "word_count": section_words[section], "review_threshold_words": 120,
+                          "instruction": "Keep highlights introductory and unresolved matters focused on current status, without repeating issue history. This is a review cue, not a cutoff. " + REVISION})
+    headings = {}
+    for index, (issue, size) in enumerate(zip(notes["issues"], issue_sizes)):
+        refs = list(dict.fromkeys(ref for block in issue["paragraphs"] for ref in block["source_ids"]))
+        if size["word_count"] > 300 or size["paragraph_count"] > 2:
+            flags.append({"code": "notes_issue_length_review", **size, "source_ids": refs,
+                          "instruction": "Review whether this issue needs this much space. Consolidate repeated examples; preserve distinct figures, outcomes, hazards, qualifications and separately cited support. Record justified exceptions; paragraph count is not a limit. " + REVISION})
+        heading = " ".join(re.findall(r"\w+", issue["heading"].casefold()))
+        if heading in headings:
+            flags.append({"code": "repeated_issue_heading_review", **size, "source_ids": refs,
+                          "instruction": f"Compare with issues/{headings[heading]} and group related business without erasing disagreement or distinct outcomes. " + REVISION})
+        headings[heading] = index
     seen = {}
     for index, (location, block) in enumerate(blocks(notes), 1):
         text = block["text"]

@@ -1274,6 +1274,24 @@ previous-meeting context, substantive issues, recorded motions/decisions, a comp
 Recorded Undertakings table and brief Unresolved Matters. The target is about
 1,800–2,400 words for a substantial meeting. Short meetings are not padded, and a
 length finding requests review instead of cutting substantive issues automatically.
+The prompt allocates space across sections, leaving room for rendered headings
+and notices. Related issues normally use one or two concise paragraphs, with
+exceptions for material business and separate source support. Private QA reports
+member-prose and section word counts, issue paragraph counts, and review cues for
+long highlights, unresolved matters, oversized issues and repeated headings.
+These are diagnostics, not automatic edits or proof of factual coverage. Detailed
+Minutes remain comprehensive, without the Meeting Notes word target; Summary,
+private Action Register and editorial source review retain separate purposes.
+Prompt changes and synthetic tests alone do not demonstrate shorter model output.
+
+Private concern text has its own 12,000-character bound; concerns over 6,000
+characters retain their complete text and receive an operator-review warning.
+Member-facing text limits, exact source-reference validation and confidentiality
+withholding are unchanged. Completed saved register/notes responses can be rendered
+without inference using `bin/render_saved_notes.py MANIFEST NEW_PRIVATE_DIRECTORY
+--manifest-sha256 SHA256`. The explicitly pinned private manifest binds original
+files and the settled source job; existing output directories are refused.
+Original responses and evidence are retained, and outputs remain review-held.
 Markdown headings and tables are rendered consistently by Python; model text is
 plain prose without decorative formatting or internal evidence citations.
 

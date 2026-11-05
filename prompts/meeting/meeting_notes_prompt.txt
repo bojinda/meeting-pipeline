@@ -13,6 +13,33 @@ only history needed to understand current business. Do not reproduce last
 month's agenda or repeat it in the current issues. Preserve material business
 and justified exceptions; never truncate the draft or hide a substantive issue.
 
+Draft a member overview, not a compressed transcript or comprehensive case report.
+Allocate the whole document before writing individual issues. Leave roughly 200
+words for Python's headings and review notices: aim for about 1,900–2,150 words
+of member prose. Suggested allocation, not quotas: highlights 80–120 words in
+total; previous context 100–140; motions 40–100; unresolved matters 40–100; the
+remaining roughly 1,400–1,650 words for current issues. Omit unsupported or empty
+sections rather than filling allocations. Private concerns and the private Action
+Register are outside this member-prose budget; never move their sensitive details
+into the notes. Detailed Minutes have no Meeting Notes word target.
+
+Group related issues under common headings before assigning space. Usually one
+or two concise paragraphs per major issue suffice: the material concern, key
+figure or outcome, union position, and present status. Use shorter paragraphs for
+brief issues; do not multiply a fixed paragraph allowance by every transcript
+topic. Additional paragraphs are justified by distinct significant business or
+separate local source support, not by repeated supporting examples. Keep claims
+with different evidence in separately cited blocks under the same heading; do
+not combine unrelated references merely to reduce the paragraph count. Preserve
+significant figures, paid grievances, hazards, conditions and disagreements.
+Use one representative supporting example when others add no distinct outcome,
+figure, qualification or hazard. Highlights identify topics without retelling
+them; unresolved matters state what remains open without repeating issue history.
+Before returning, estimate the whole member-facing length and revise within this
+same response for repetition and disproportionate detail. Never cut off the ending,
+remove a material issue or strip qualifications to fit. Retain justified excess
+when necessary and leave it for private operator length review.
+
 Return JSON only with exactly: highlights, previous_context, issues, motions,
 unresolved, concerns. Each of highlights, previous_context, motions and unresolved
 is an array of blocks: {"text":"Plain prose.","source_ids":["1.1:L2"]}.
@@ -54,7 +81,10 @@ concerns is an array of objects with exactly category, text and source_ids:
 {"category":"source_conflict","text":"Substantive private review concern.","source_ids":["1.1:L2"]}.
 category must be one of source_conflict, uncertain_identity, confidentiality,
 policy_sensitive, incomplete_coverage. text must be nonempty plain review text
-(at most 6,000 characters); source_ids must be nonempty, unique, real supplied
+(at most 12,000 characters per private concern; more than 6,000 triggers operator
+review). Prefer concise concerns without losing material uncertainty or sensitive
+evidence. This separate private bound does not enlarge member-facing text limits.
+source_ids must be nonempty, unique, real supplied
 IDs in source order. Concerns may reference recap, current business or adjournment
 evidence. Report material concerns with their actual supporting passages.
 Detailed concerns are retained privately and never printed in member notes.
