@@ -20,6 +20,30 @@ def blocks(notes):
             yield f"issues/{index}/paragraphs/{number}", block
 
 
+def factual_risks(text, source):
+    """Conservative source-review targets, not determinations that claims are false."""
+    risks=[]
+    def add(code,instruction):risks.append((code,instruction))
+    if re.search(r'\bstall\w*\b',text,re.I) and re.search(r'\bderail\w*\b',text,re.I):
+        add('incident_relationship_review','Check whether the stall and derailment are separate incidents. Shared discussion does not establish one sequence or cause.')
+    if re.search(r'\b(?:caus\w*|because|therefore|resulted|led to|due to)\b',text,re.I):
+        add('causal_support_review','Verify the causal relationship itself, including later qualifications; nearby events or matching nouns do not establish causation.')
+    if re.search(r'\b(?:labou?r code|human rights act|bylaws|legislat\w*|legal|collective agreement|CROR|CRR)\b',text,re.I):
+        add('legal_interpretation_review','Preserve attribution to participants for legal, rule and agreement interpretations. No independent legal verification is supplied; verify scope and conditions.')
+    if re.search(r'\bcode of conduct\b',text,re.I):
+        add('policy_scope_review','Distinguish the policy text read aloud from a participant interpretation. A limit on employment decisions is not automatically a blanket ban on family supervision.')
+    if re.search(r'\b(?:alleg\w*|hearsay|false information|incorrect numbers|fraud\w*|theft|dishonest\w*|complaint|drug.test\w*)\b',text+'\n'+source,re.I):
+        add('claim_certainty_review','Preserve hearsay/allegation status and distinguish a proposed complaint from a filed one. Check qualifications through every clause, not only the paragraph opening.')
+    if re.search(r'\b(?:medical issue|medical condition|single parent|symptoms?|witness|sick days|in (?:hogger|engineer) training|termination|drug.test\w*)\b',text,re.I):
+        add('member_identifiability_review','Check combinations of location, role, case, medical and family details for identification. Retain systemic business while withholding unnecessary personal information.')
+    if re.search(r'\b(?:benzene|chemical|gas leak)\b',text,re.I):
+        add('substance_identity_review','Reported chemical identification or acknowledgement of a leak is not independent confirmation of the substance. Preserve uncertainty and distinguish each source.')
+    acronyms=set(re.findall(r'\b[A-Z][A-Z0-9]{1,9}\b',text))-set(re.findall(r'\b[A-Z][A-Z0-9]{1,9}\b',source))
+    if acronyms:
+        add('terminology_support_review','Verify terminology/acronyms against the source; do not invent expansions or silently repair uncertain ASR. Unmatched tokens: '+', '.join(sorted(acronyms)))
+    return risks
+
+
 def review_quality(notes, records, document):
     """Heuristic warnings only: even matching words/numbers cannot prove support."""
     flags = []
@@ -66,6 +90,7 @@ def review_quality(notes, records, document):
             flags.append({"code": code, "notes_location": location,
                           "source_ids": list(block["source_ids"]),
                           "evidence_pointer": f"{TRACE}#block-{index}", "instruction": instruction})
+        for code,instruction in factual_risks(text,source):flag(code,instruction)
         if re.search(r"\b(?:chair(?:person)?|presiding officer|president)\b", text, re.I):
             flag("role_attribution_review", "Verify the role and attribution against this exact turn and approved identity evidence. Nearby names and speaker labels do not establish the chair; use a participant when uncertain.")
         if re.search(r"\b(?:alleg\w*|rumou?rs?|hearsay|unverified|suspect\w*|false information|fraud\w*|theft|dishonest\w*)\b", source + "\n" + text, re.I):

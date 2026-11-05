@@ -386,7 +386,7 @@ class EditorialTests(unittest.TestCase):
         self.assertEqual(clean["issues"][0]["paragraphs"][0]["support"]["status"], "uncertain_local_support")
         with tempfile.TemporaryDirectory() as tmp:
             review = ed.finish(Path(tmp), self.register(), clean, "# Minutes", self.source, records=self.records)
-            entry = next(f for f in review["findings"] if f.get("notes_location") == "issues/0/paragraphs/0")
+            entry = next(f for f in review["findings"] if f.get("notes_location") == "issues/0/paragraphs/0" and f["code"] == "notes_support_review")
             self.assertEqual(entry["code"], "notes_support_review")
             self.assertEqual(entry["source_ids"], ["3:L5"])
             self.assertEqual(entry["claim"], block["text"])
