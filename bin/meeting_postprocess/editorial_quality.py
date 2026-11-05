@@ -32,13 +32,13 @@ def review_quality(notes, records, document):
                     "paragraph_count": len(issue["paragraphs"])} for i, issue in enumerate(notes["issues"])]
     section_words["issues"] = sum(row["word_count"] for row in issue_sizes)
     metrics = {"document_words": count, "previous_context_words": recap,
-               "target_words": [1800, 2400], "substantial_source": substantial,
+               "target_words": [2600, 3000], "substantial_source": substantial,
                "member_prose_words": sum(section_words.values()), "section_words": section_words,
                "issues": issue_sizes,
                "automatic_revision": False}
-    if count > 2400 or (substantial and count < 1800):
+    if count > 3000 or (substantial and count < 2600):
         flags.append({"code": "length_review", "word_count": count,
-                      "target_words": [1800, 2400], "instruction": REVISION})
+                      "target_words": [2600, 3000], "instruction": REVISION})
     if recap > 180 or recap > max(80, count * .15):
         flags.append({"code": "previous_context_length_review", "word_count": recap,
                       "instruction": "Review the recap for relevance to current business; retain necessary context and preserve the full source. " + REVISION})

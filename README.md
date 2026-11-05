@@ -1272,7 +1272,7 @@ this shared boundary instead of copying the private processing directory.
 The editorial prototype adds `meeting-notes-draft.md` with Meeting Highlights,
 previous-meeting context, substantive issues, recorded motions/decisions, a compact
 Recorded Undertakings table and brief Unresolved Matters. The target is about
-1,800–2,400 words for a substantial meeting. Short meetings are not padded, and a
+2,600–3,000 words for a substantial meeting. Short meetings are not padded, and a
 length finding requests review instead of cutting substantive issues automatically.
 The prompt allocates space across sections, leaving room for rendered headings
 and notices. Related issues normally use one or two concise paragraphs, with

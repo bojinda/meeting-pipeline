@@ -66,7 +66,7 @@ class EditorialInstructionTests(unittest.TestCase):
         self.assertIn("organize by issue, not speaker or transcript chunk", self.instructions)
         self.assertIn("readable paragraphs", self.instructions)
         self.assertIn("highlights should concisely identify the most important business", self.instructions)
-        self.assertIn("1,800–2,400", self.template)
+        self.assertIn("2,600–3,000", self.template)
         self.assertIn("do not pad it or invent context", self.instructions)
         self.assertIn("shorter meeting may need far fewer words", self.instructions)
 

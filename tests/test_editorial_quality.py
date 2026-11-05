@@ -32,14 +32,14 @@ class EditorialQualityTests(unittest.TestCase):
         chunks, _, notes = fixture()
         records = ed.source_records(chunks)
         before = copy.deepcopy(notes)
-        metrics, flags = review_quality(notes, records, "business " * 2401)
+        metrics, flags = review_quality(notes, records, "business " * 3001)
         warning = next(f for f in flags if f["code"] == "length_review")
-        self.assertEqual(warning["word_count"], 2401)
+        self.assertEqual(warning["word_count"], 3001)
         self.assertIn("Never truncate", warning["instruction"])
         self.assertIn("separate copy", warning["instruction"])
         self.assertFalse(metrics["automatic_revision"])
         self.assertEqual(notes, before)
-        for words in (120, 1800, 2400):
+        for words in (120, 2600, 3000):
             self.assertNotIn("length_review", [f["code"] for f in review_quality(notes, records, "business " * words)[1]])
         records["3:L1"]["text"] = "source " * 4001
         self.assertIn("length_review", [f["code"] for f in review_quality(notes, records, "business " * 1500)[1]])
@@ -67,7 +67,7 @@ class EditorialQualityTests(unittest.TestCase):
     def test_full_generation_preserves_responses_private_permissions_and_hold(self):
         chunks, register, notes = fixture()
         paragraph = notes["issues"][0]["paragraphs"][0]
-        paragraph["text"] = "The presiding officer alleged false information. " + "Substantive business. " * 150
+        paragraph["text"] = "The presiding officer alleged false information. " + "Substantive business. " * 180
         notes["issues"][0]["paragraphs"] = [copy.deepcopy(paragraph) for _ in range(9)]
         original = json.dumps(notes)
         calls = []

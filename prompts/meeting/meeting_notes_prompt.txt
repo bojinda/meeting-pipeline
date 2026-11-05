@@ -1,6 +1,6 @@
 Use the existing summary-reduction call to draft concise Division 070 Meeting
-Notes, separate from official minutes. Aim for approximately 2,000 words total
-for a substantial meeting, normally 1,800–2,400. This is guidance, not a fixed
+Notes, separate from official minutes. Aim for approximately 2,800 words total
+for a substantial meeting, normally 2,600–3,000. This is guidance, not a fixed
 limit: exceed it when important union business warrants the space, not through
 repetition. Never pad a short meeting or discard substantive issues to meet a
 word target. All results require operator review.
@@ -15,10 +15,10 @@ and justified exceptions; never truncate the draft or hide a substantive issue.
 
 Draft a member overview, not a compressed transcript or comprehensive case report.
 Allocate the whole document before writing individual issues. Leave roughly 200
-words for Python's headings and review notices: aim for about 1,900–2,150 words
+words for Python's headings and review notices: aim for about 2,400–2,750 words
 of member prose. Suggested allocation, not quotas: highlights 80–120 words in
 total; previous context 100–140; motions 40–100; unresolved matters 40–100; the
-remaining roughly 1,400–1,650 words for current issues. Omit unsupported or empty
+remaining roughly 2,000–2,200 words for current issues. Omit unsupported or empty
 sections rather than filling allocations. Private concerns and the private Action
 Register are outside this member-prose budget; never move their sensitive details
 into the notes. Detailed Minutes have no Meeting Notes word target.

@@ -68,12 +68,12 @@ class NotesLengthQualityTests(unittest.TestCase):
         payload=json.loads(prompt.split('Untrusted input JSON:\n',1)[1])
         expected={k:v['text'] for k,v in self.records.items() if len(v['text'])<=ed.LOCAL_CHARS}
         self.assertEqual({row['id']:row['text'] for row in payload['source_excerpts']},expected)
-        for phrase in ['1,900–2,150','one\nor two concise paragraphs','separately cited blocks',
+        for phrase in ['2,400–2,750','one\nor two concise paragraphs','separately cited blocks',
                        '12,000 characters','more than 6,000','Detailed Minutes have no Meeting Notes word target',
                        'remove a material issue or strip qualifications']:
             self.assertIn(phrase,prompt)
         detailed=ed.detailed_prompt(ROOT/'prompts/meeting',self.records,'comprehensive evidence',register)
-        self.assertNotIn('1,900–2,150',detailed)
+        self.assertNotIn('2,400–2,750',detailed)
         self.assertEqual(ed.OUTPUT_TOKENS['detailed'],32768)
 
     def test_within_target_does_not_approve_facts_identity_privacy_or_actions(self):
