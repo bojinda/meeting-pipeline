@@ -125,3 +125,18 @@ class RefinementTests(unittest.TestCase):
         for row in data['source_excerpts']:self.assertEqual(row['text'],self.records[row['id']]['text'])
         self.assertIn('2,600–3,000',prompt);self.assertIn('separate train-handling incidents',prompt)
         self.assertIn('reported\ninterpretations',prompt);self.assertIn('Never infer a speaker',prompt)
+
+    def test_complete_coverage_can_copy_existing_material_errors_and_still_requires_review(self):
+        # Frozen synthetic counterexamples: no identities or meeting details.
+        cases=[('In one case a train stalled, then a car derailed.', 'refinement_incident_relationship_review'),
+               ('The Labour Code requires every request to be granted.', 'refinement_legal_interpretation_review'),
+               ('The award is under review because the company provided false information.', 'refinement_allegation_causation_review'),
+               ('The member in engineer training has a medical issue and is a single parent.', 'refinement_member_privacy_review')]
+        for text,expected in cases:
+            with self.subTest(expected=expected):
+                original=copy.deepcopy(self.original);raw=copy.deepcopy(self.response)
+                original['issues'][0]['paragraphs'][0]['text']=text
+                raw['notes']['issues'][0]['paragraphs'][0]['text']=text
+                _,flags=nr.validate(raw,original,self.records,self.source)
+                self.assertIn(expected,{f['code'] for f in flags})
+                self.assertIn('refinement_semantic_coverage_review',{f['code'] for f in flags})

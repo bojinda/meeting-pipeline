@@ -1284,6 +1284,32 @@ Minutes remain comprehensive, without the Meeting Notes word target; Summary,
 private Action Register and editorial source review retain separate purposes.
 Prompt changes and synthetic tests alone do not demonstrate shorter model output.
 
+Experimental single-pass refinement is implemented in
+`meeting_postprocess.notes_refinement.run_once`, but is deliberately not connected
+to normal automatic generation pending editorial acceptance. An isolated caller
+must supply the existing runner-admitted Qwen adapter and local tokenizer budget.
+The module makes at most one additional request and refuses repeat attempts in
+the same output directory. It never regenerates maps or the private register.
+Context-budget failure makes no request. Existing production call counts and
+Detailed Minutes are unchanged.
+
+The original valid draft, structured evidence and model response remain intact.
+The separately private `notes-refinement/` directory contains the raw refinement
+reply, a held candidate draft/summary, exact source review, an unchanged canonical
+action register and all original private concerns. `refinement-review.private.json`
+accounts for every original prose block, records explicit withholding/corrections
+and flags changed figures, qualifications and combined accounts. A failed response
+retains the original and is not retried. A valid candidate is never automatically
+selected, exported or approved.
+
+Structural validation and model coverage claims do not establish factual
+completeness. Review inherited errors even when text was copied unchanged:
+separate train-handling incidents, disputed allegations and causal claims, reported
+legal interpretations, and combinations of member details that could identify a
+person. Meeting Notes retain flexible length guidance; private factual and privacy
+review remains necessary regardless of word count. Enable normal integration only
+after an isolated result meets the editorial acceptance gate.
+
 Private concern text has its own 12,000-character bound; concerns over 6,000
 characters retain their complete text and receive an operator-review warning.
 Member-facing text limits, exact source-reference validation and confidentiality

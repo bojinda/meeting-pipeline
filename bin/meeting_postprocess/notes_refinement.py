@@ -83,6 +83,20 @@ def validate(raw, original, records, source):
     if seen != set(before) or used != set(after):
         raise ed.EditorialFailure('incomplete_refinement_coverage')
     for location,block in after.items():
+        # Review inherited risks as well as changes. A model can preserve every
+        # number/reference while copying the first draft's mistaken relationship.
+        text = block['text']
+        risks = []
+        if re.search(r'\bstall\w*\b', text, re.I) and re.search(r'\bderail\w*\b', text, re.I):
+            risks.append(('refinement_incident_relationship_review', 'Verify whether the stall and derailment are separate incidents. Shared discussion or citations do not establish a single sequence or causation.'))
+        if re.search(r'\b(?:labou?r code|human rights act|bylaws|legislat\w*|legal|statut\w*)\b', text, re.I):
+            risks.append(('refinement_legal_interpretation_review', 'Distinguish a reported interpretation from verified law throughout the paragraph. No independent legal verification or advice is supplied by refinement.'))
+        if re.search(r'\b(?:false information|incorrect numbers|fraud\w*|theft|dishonest\w*)\b', text, re.I):
+            risks.append(('refinement_allegation_causation_review', 'Keep every disputed allegation and causal clause attributed; a paragraph-opening attribution does not certify later conclusions.'))
+        if re.search(r'\b(?:medical issue|medical condition|single parent|symptoms?|witness|in (?:hogger|engineer) training)\b', text, re.I):
+            risks.append(('refinement_member_privacy_review', 'Review combinations of location, role, case details, medical/family facts and witness narrative for re-identification. Retain systemic business without unnecessary personal detail.'))
+        findings.extend({'code':code,'notes_location':location,'source_ids':block['source_ids'],'instruction':instruction}
+                        for code,instruction in risks)
         origins = [r['original_block'] for r in raw['coverage'] if location in r['revised_blocks']]
         if len(origins) > 1:
             findings.append({'code':'refinement_combined_accounts_review','notes_location':location,'original_blocks':origins,
