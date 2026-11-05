@@ -1284,6 +1284,49 @@ Minutes remain comprehensive, without the Meeting Notes word target; Summary,
 private Action Register and editorial source review retain separate purposes.
 Prompt changes and synthetic tests alone do not demonstrate shorter model output.
 
+The summary wrapper enables one targeted factual-correction stage for Meeting
+Notes by default (`MEETING_NOTES_CORRECTION=1`). Set it to `0`, or pass
+`--no-meeting-notes-correct`, to keep the original request count. Direct Python
+callers opt in with `--meeting-notes-correct`. This affects meeting notes only;
+lesson processing, recording, transcription, maps and the register are unchanged.
+Full-document mode completes comprehensive Detailed Minutes before correction.
+The correction request disables thinking explicitly, without changing other model calls.
+The stage uses the same configured Qwen model, tokenizer/context
+budget and existing runner stage. It makes one request at most, never retries,
+and skips inference if no questionable passages are found or the budget fails.
+
+The goal is factual accuracy, attribution and confidentiality, not shortening.
+Initial prompts and deterministic QA flag possible incident conflation, unsupported
+causation, misleading certainty, policy/legal scope, member identification,
+chemical identity and unsupported terminology. These are conservative review
+targets, not declarations that a claim is false. Packets contain the original
+passage and exact source lines with neighboring context. At most 24 packets are
+sent in one request; additional targets remain explicitly listed for review.
+
+Original notes, responses, structured evidence, private concerns and the canonical
+action register remain intact. `notes-correction/candidate/` contains a separate
+**unverified** private candidate, source references, unresolved questions, edit
+decisions and `correction-comparison.private.md`. It is never substituted for the
+original downstream draft. All versions remain held and export-blocked. Invalid
+schemas, unknown references, fabricated support quotes, detected new unsupported
+figures/names and explicit sensitive-content violations reject the affected edit.
+Insufficient-evidence entries and verbatim replacements retain the original passage.
+Copied wording is reported as unchanged even if the model claims it corrected a problem. Other eligible edits
+may appear in the candidate but require independent semantic and privacy review:
+an exact quote or valid source ID does not prove the proposed relationship.
+
+For offline independent review, `bin/apply_notes_corrections.py` and
+`notes_correction.render_version` accept decisions
+bound to the exact model-response bytes, original evidence and correction-packet hashes. A
+reviewer may reject any eligible proposal, and cannot override a hard guard to
+accept an invalid one. It produces a fresh reviewed private version without a
+new model request. These edit decisions never approve identities, actions or
+publication. Reported legal and agreement interpretations remain attributed unless
+independently verified against authoritative outside sources. A failed correction
+cannot replace the valid original or change Detailed Minutes. Source activation
+must be separately controlled; adding this capability does not activate it on
+an existing production checkout.
+
 Private concern text has its own 12,000-character bound; concerns over 6,000
 characters retain their complete text and receive an operator-review warning.
 Member-facing text limits, exact source-reference validation and confidentiality

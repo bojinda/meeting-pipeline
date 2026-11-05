@@ -67,7 +67,7 @@ def input_files(command):
         for path in (root / 'prompts/meeting').glob('*.txt'):
             extra['editorial_prompt_' + path.stem] = {'path': str(path), 'required': True, 'snapshot': True}
         from meeting_postprocess.editorial_checkpoint import MAP_CODE
-        for name in (*MAP_CODE, 'editorial', 'editorial_checkpoint', 'ollama_response'):
+        for name in (*MAP_CODE, 'editorial', 'editorial_checkpoint', 'ollama_response', 'editorial_quality', 'notes_correction'):
             extra['editorial_code_' + name] = {'path': str(root / 'bin/meeting_postprocess' / (name + '.py')), 'required': True, 'snapshot': False}
         extra['editorial_engine'] = {'path': str(root / 'bin/ollama_session_summary.py'), 'required': True, 'snapshot': False}
         if not editorial_tokenizer:

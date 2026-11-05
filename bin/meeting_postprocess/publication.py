@@ -13,6 +13,8 @@ from .speaker_turns import CORRECTIONS_FILE, TURNS_FILE, CONFLICTS_FILE, INSPECT
 PUBLIC_MEETING_FILENAMES = ("summary.md", "action-items.md", "minutes-draft.md")
 PRIVATE_MEETING_FILENAMES = frozenset({PRIVATE_REDACTION_FILENAME.casefold(), PRIVATE_SUGGESTIONS_FILENAME.casefold(), PRIVATE_ROSTER_FILENAME.casefold(), "speaker_aliases.json", CORRECTIONS_FILE, TURNS_FILE, CONFLICTS_FILE, "whole-source.json", "whole-evidence.json", "whole-plan.json", "whole-run.json", "whole-model-response.json", "chunk-plan.json", "chunk-comparison.json"})
 EDITORIAL_PRIVATE_FILENAMES = frozenset({"action-register.private.json", "action-register.private.md", "editorial-review.private.json", "operator-review.private.md", "editorial-response.private.json", "notes-evidence.private.json", "editorial-budgets.private.json", "editorial-dispositions.private.json", "editorial-generation.private.json", "editorial-map-checkpoint.private.json"})
+EDITORIAL_PRIVATE_FILENAMES |= {"correction-response.private.json", "correction-packets.private.json",
+                                "correction-review.private.json", "correction-comparison.private.md"}
 PRIVATE_MEETING_FILENAMES |= EDITORIAL_PRIVATE_FILENAMES
 EDITORIAL_PRIVATE_FILENAMES |= {"notes-source-review.private.md", "completion-provenance.private.json"}
 PRIVATE_MEETING_FILENAMES |= EDITORIAL_PRIVATE_FILENAMES

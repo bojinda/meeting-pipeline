@@ -920,7 +920,7 @@ def finish(directory, register, notes, detailed, source, findings=(), *, records
     return review
 
 
-def run(directory, chunks, combined, current, recap, commitments, context, aliases, approved, warnings, prompts, generate, keep_recap, *, budget, notes_only=False):
+def run(directory, chunks, combined, current, recap, commitments, context, aliases, approved, warnings, prompts, generate, keep_recap, *, budget, notes_only=False, correct=False):
     """Reuse action, summary and detailed-minutes reduction slots, in that order."""
     write_private_json(directory / REVIEW, {"status": "review_hold", "phase": "incomplete"})
     records = source_records(chunks)
@@ -928,6 +928,16 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
     raw, assessment, diagnostics, reference_changes = {}, None, [], []
     review = None
     phase = "register"
+    def correct_notes():
+        if correct:
+            from .notes_correction import run_once, DIRECTORY
+            try:
+                result = run_once(directory, prompts, generate, budget)
+            except Exception:
+                # Optional candidate storage failure must not invalidate the
+                # completed original documents. Never print private errors.
+                result = {"result": "correction_output_or_internal_failure"}
+            print(f"[editorial] Factual correction: {result['result']}; original remains selected; unverified private review: {directory / DIRECTORY}", flush=True)
     def request(stage, prompt, structured=False):
         measured = budget.measure(stage, prompt, structured)
         write_private_json(directory / BUDGETS, {"requests": budget.measurements})
@@ -976,6 +986,7 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
         state = "Draft ready with review warnings" if review["findings"] else "Draft ready"
         print(f"[editorial] {state}: {directory / 'meeting-notes-draft.md'}; private, review hold; {review['notes_word_count']} words", flush=True)
         if notes_only:
+            correct_notes()
             return 0
         phase = "detailed"
         raw["detailed"] = request("detailed", detailed_prompt(prompts, records, current, register))
@@ -993,6 +1004,7 @@ def run(directory, chunks, combined, current, recap, commitments, context, alias
         private_text(directory / "minutes-draft.md", detailed)
         write_report(directory, check_minutes(detailed, source) + list(warnings))
         print(f"[editorial] review hold; {review['notes_word_count']} words; {len(review['findings'])} finding(s)", flush=True)
+        correct_notes()
         return 0
     except Exception as exc:
         from .ollama_response import GenerationFailure

@@ -29,6 +29,7 @@ NOTES_OUTPUT_SET=0
 NOTES_CONTEXT_SET=0
 NOTES_TOKENIZER_SET=0
 NOTES_MODE_SET=0
+NOTES_CORRECTION_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --dual-gpu-target)
@@ -38,6 +39,8 @@ while [ "$#" -gt 0 ]; do
       NOTES=1; SUMMARY_OPTIONS+=("$1"); shift ;;
     --meeting-notes-only|--no-meeting-notes-only)
       NOTES_MODE_SET=1; SUMMARY_OPTIONS+=("$1"); shift ;;
+    --meeting-notes-correct|--no-meeting-notes-correct)
+      NOTES_CORRECTION_SET=1; SUMMARY_OPTIONS+=("$1"); shift ;;
     --keep-recap|--no-keep-recap)
       SUMMARY_OPTIONS+=("$1"); shift ;;
     --speaker-aliases|--map-model|--reduce-model|--map-num-ctx|--reduce-num-ctx|--keep-alive|--temperature|--ollama-url|--chunk-plan|--chunk-comparison-dir|--chunk-tokenizer|--meeting-notes-output-dir|--meeting-notes-tokenizer|--meeting-notes-thinking|--meeting-notes-checkpoint|--meeting-notes-checkpoint-sha256)
@@ -53,6 +56,15 @@ while [ "$#" -gt 0 ]; do
 done
 if [ "$NOTES" = 1 ]; then
   umask 077
+  # One held correction candidate for future meetings after source activation.
+  # Explicit CLI disable takes precedence; lesson processing does not use this.
+  if [ "$NOTES_CORRECTION_SET" = 0 ]; then
+    case "${MEETING_NOTES_CORRECTION:-1}" in
+      0) ;;
+      1) SUMMARY_OPTIONS+=(--meeting-notes-correct) ;;
+      *) echo "ERROR: MEETING_NOTES_CORRECTION must be 0 or 1" >&2; exit 64 ;;
+    esac
+  fi
   export MEETING_MAP_MODEL="${MEETING_MAP_MODEL:-qwen3.8:27b}"
   export MEETING_REDUCE_MODEL="${MEETING_REDUCE_MODEL:-qwen3.8:27b}"
   export MEETING_MAP_NUM_CTX="${MEETING_MAP_NUM_CTX:-16384}"

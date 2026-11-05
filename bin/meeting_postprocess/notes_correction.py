@@ -47,7 +47,7 @@ def make_packets(notes, records, findings, selections=None):
         available=[key for key,row in records.items() if key in context and len(row['text'])<=ed.LOCAL_CHARS]
         candidates.append({'passage_id':loc,'original_text':b['text'],'original_source_ids':b['source_ids'],
                            'context_source_ids':available,'questions':selection['questions'],
-                           'omitted_source_ids':[key for key in context if key in records and len(records[key]['text'])>ed.LOCAL_CHARS]})
+                           'omitted_source_ids':[key for key,row in records.items() if key in context and len(row['text'])>ed.LOCAL_CHARS]})
     return candidates[:MAX_PACKETS], [r['passage_id'] for r in candidates[MAX_PACKETS:]]
 
 
@@ -108,7 +108,10 @@ def assess(raw, packets, original, records):
             candidate=plain_notes(original);replace_block(candidate,row['passage_id'],row['replacement_text'],refs)
             ed.validate_notes(candidate,records,'\n'.join(r['text'] for r in records.values()))
             risk=[{'code':code,'instruction':instruction} for code,instruction in factual_risks(row['replacement_text'],source)]
-            result.update(status='eligible_unverified',reason='independent_semantic_review_required',risk_findings=risk)
+            if row['replacement_text']==old[row['passage_id']]['text']:
+                result.update(status='unchanged',reason='no_text_change_review_remains',risk_findings=risk)
+            else:
+                result.update(status='eligible_unverified',reason='independent_semantic_review_required',risk_findings=risk)
         except (KeyError,TypeError,ValueError) as exc:
             result['reason']=str(exc) if isinstance(exc,ed.EditorialFailure) else 'invalid_correction_schema'
         results.append(result)
@@ -138,12 +141,15 @@ def render_version(parent, output, response, packets, *, decisions=None):
     raw=json.loads(response);assessment=assess(raw,packets,original,records)
     selected={};mode='automated_unverified_candidate'
     if decisions is not None:
-        if (not ed._object(decisions,'response_sha256 evidence_sha256 decisions') or decisions['response_sha256']!=sha(response)
-                or decisions['evidence_sha256']!=sha(evidence_bytes) or not ed._list(decisions['decisions'])):
+        if (not ed._object(decisions,'response_sha256 evidence_sha256 packets_sha256 decisions') or decisions['response_sha256']!=sha(response)
+                or decisions['evidence_sha256']!=sha(evidence_bytes) or decisions['packets_sha256']!=ed.digest(packets)
+                or not ed._list(decisions['decisions'])):
             raise ed.EditorialFailure('correction_review_binding_mismatch')
         for decision in decisions['decisions']:
             if (not ed._object(decision,'passage_id decision reason') or decision['decision'] not in ('accept','reject')
-                    or not ed._text(decision['reason'],limit=6000) or decision['passage_id'] in selected):
+                    or not ed._text(decision['reason'],limit=6000) or not isinstance(decision['passage_id'],str)
+                    or decision['passage_id'] not in {p['passage_id'] for p in packets}
+                    or decision['passage_id'] in selected):
                 raise ed.EditorialFailure('invalid_correction_decision')
             selected[decision['passage_id']]=decision
         mode='independently_reviewed_private_edits'
@@ -160,9 +166,19 @@ def render_version(parent, output, response, packets, *, decisions=None):
     clean=ed.validate_notes(notes,records,source)
     output.mkdir(mode=0o700)
     review=ed.finish(output,register,clean,None,source,records=records)
+    # Visible private status follows the version when opened independently.
+    label = ('Unverified correction candidate. Independent semantic and privacy review required.'
+             if decisions is None else 'Private correction review copy. Final human approval remains required.')
+    banner = '> ' + label + ' Publication hold; original draft remains selected.\n\n'
+    for name in ('meeting-notes-draft.md','summary.md'):
+        path=output/name
+        path.write_text(banner+path.read_text(encoding='utf-8'),encoding='utf-8',newline='\n')
+    review['notes_word_count']=len((output/'meeting-notes-draft.md').read_text(encoding='utf-8').split())
+    review['notes_quality']['document_words']=review['notes_word_count']
     for name in (ed.REGISTER,ed.REGISTER_MD):
         if (parent/name).exists():(output/name).write_bytes((parent/name).read_bytes())
     report={'status':'review_hold','mode':mode,'candidate_selected':False,'response_sha256':sha(response),'evidence_sha256':sha(evidence_bytes),
+            'packets_sha256':ed.digest(packets),'unchanged_count':sum(a['status']=='unchanged' for a in assessment),
             'proposed_count':len(raw['corrections']),'applied_passages':applied,'applied_count':len(applied),
             'unapplied_count':len(raw['corrections'])-len(applied),'assessment':assessment,'word_count':review['notes_word_count'],
             'semantic_accuracy':'Independent source review required; valid references and exact quotes are not proof.',
@@ -214,10 +230,10 @@ def run_once(directory, prompts, generate, budget, *, selections=None):
         if not measured['fits']:raise ed.EditorialFailure('correction_context_exceeded')
         def callback(info):ed.write_private_json(out/ed.DIAGNOSTICS,{'requests':[{'stage':'correction',**info}]})
         result['request_attempts']=1
-        answer=generate(prompt,structured=True,num_predict=measured['reserved_output'],response_callback=callback)
+        answer=generate(prompt,structured=True,num_predict=measured['reserved_output'],response_callback=callback,thinking=False)
         raw=answer.encode('utf-8');(out/RESPONSE).write_bytes(raw)
         report=render_version(parent,out/'candidate',raw,packets)
-        result.update(result='unverified_candidate',proposed_count=report['proposed_count'],applied_count=report['applied_count'],
+        result.update(result='unverified_candidate',proposed_count=report['proposed_count'],applied_count=report['applied_count'],unchanged_count=report['unchanged_count'],
                       word_count=report['word_count'],unselected_passages=unselected)
     except Exception as exc:
         from .ollama_response import GenerationFailure

@@ -21,12 +21,22 @@ def fake_generate(**kwargs):
     prompt = kwargs["prompt"]
     if "Transcript chunk:" in prompt:
         return "## Topics\n" + prompt.split("Transcript chunk:\n", 1)[1]
-    if "propose ONE private canonical" in prompt:
+    if "Perform one targeted factual-correction pass" in prompt:
+        payload = json.loads(prompt.split("Untrusted input JSON:\n", 1)[1])
+        packet = payload["packets"][0]
+        source = next(r for r in payload["source_excerpts"] if r["id"] in packet["original_source_ids"])
+        answer = json.dumps({"corrections":[{"passage_id":packet["passage_id"],
+            "replacement_text":"A participant reported that staffing remains unresolved.","source_ids":[source["id"]],
+            "explanation":"Keeps the reported status.","unresolved_questions":["Confirm the underlying staffing position."],
+            "evidence_insufficient":False,"support":[{"source_id":source["id"],"quote":source["text"]}]}]})
+    elif "propose ONE private canonical" in prompt:
         answer = '{"items":[]}'
     elif "summary-reduction call" in prompt:
         evidence = json.loads(prompt.split("Untrusted input JSON:\n", 1)[1])["source_excerpts"]
         ref = next(r["id"] for r in evidence if r["section"] == ed.BUSINESS)
         block = {"text": "A participant reported that staffing remains unresolved.", "source_ids": [ref]}
+        if os.environ.get("NOTES_TEST_CORRECTION") == "1":
+            block["text"] = "A participant alleged that staffing remains unresolved."
         answer = json.dumps({"highlights": [], "previous_context": [], "issues": [{"heading": "Staffing", "paragraphs": [block]}],
                              "motions": [], "unresolved": [], "concerns": []})
         if os.environ.get("NOTES_TEST_EMPTY") == "1":
@@ -68,7 +78,7 @@ class MeetingNotesWorkflowTests(unittest.TestCase):
         tokenizer.save(str(self.tokenizer))
         config = self.project / "config/.env"
         config.parent.mkdir()
-        config.write_text(f"HF_TOKEN=synthetic\nDELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION=0\nMEETING_KEEP_RECAP=1\n"
+        config.write_text(f"HF_TOKEN=synthetic\nDELETE_SOURCE_AUDIO_AFTER_TRANSCRIPTION=0\nMEETING_KEEP_RECAP=1\nMEETING_NOTES_CORRECTION=0\n"
                           f"MEETING_SUMMARY_PYTHON={sys.executable}\nMEETING_SUMMARIES_ROOT={self.project}/meeting-summaries\n"
                           "OLLAMA_MAP_MODEL=legacy-model\nOLLAMA_REDUCE_MODEL=legacy-model\nOLLAMA_REDUCE_NUM_CTX=32768\n")
         whisper = self.binary / "whisperx"

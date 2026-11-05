@@ -61,10 +61,10 @@ class CorrectionTests(unittest.TestCase):
         row={**self.row,'evidence_insufficient':True,'replacement_text':None,'support':[],'source_ids':[]}
         report=nc.render_version(self.root,self.root/'insufficient',self.response([row]),self.packets)
         self.assertEqual(report['applied_count'],0);self.assertEqual(report['assessment'][0]['status'],'insufficient_evidence')
-        self.assertEqual((self.root/'insufficient/meeting-notes-draft.md').read_bytes(),self.original['meeting-notes-draft.md'])
+        self.assertTrue((self.root/'insufficient/meeting-notes-draft.md').read_bytes().endswith(self.original['meeting-notes-draft.md']))
 
     def test_independent_rejection_overrides_valid_ids_and_quotes(self):
-        response=self.response();decision={'response_sha256':nc.sha(response),'evidence_sha256':nc.sha(self.original[ed.NOTES_EVIDENCE]),
+        response=self.response();decision={'response_sha256':nc.sha(response),'evidence_sha256':nc.sha(self.original[ed.NOTES_EVIDENCE]),'packets_sha256':ed.digest(self.packets),
             'decisions':[{'passage_id':self.loc,'decision':'reject','reason':'The quoted words do not support the proposed relationship.'}]}
         report=nc.render_version(self.root,self.root/'reviewed',response,self.packets,decisions=decision)
         self.assertEqual(report['applied_count'],0);self.unchanged()
@@ -73,13 +73,31 @@ class CorrectionTests(unittest.TestCase):
 
     def test_independent_acceptance_cannot_bypass_hard_validation(self):
         row={**self.row,'replacement_text':'Private medical history.'};response=self.response([row])
-        decision={'response_sha256':nc.sha(response),'evidence_sha256':nc.sha(self.original[ed.NOTES_EVIDENCE]),
+        decision={'response_sha256':nc.sha(response),'evidence_sha256':nc.sha(self.original[ed.NOTES_EVIDENCE]),'packets_sha256':ed.digest(self.packets),
             'decisions':[{'passage_id':self.loc,'decision':'accept','reason':'Attempted unsafe acceptance.'}]}
         with self.assertRaisesRegex(ed.EditorialFailure,'cannot_accept'):nc.render_version(self.root,self.root/'invalid',response,self.packets,decisions=decision)
 
     def test_duplicate_targets_rejected_not_last_write_wins(self):
         assessed=nc.assess({'corrections':[self.row,self.row]},self.packets,self.notes,self.records)
         self.assertTrue(all(r['status']=='rejected' for r in assessed))
+
+    def test_copied_wording_is_not_counted_as_a_factual_correction(self):
+        row={**self.row,'replacement_text':self.notes['issues'][0]['paragraphs'][0]['text'],
+             'explanation':'Claims to have qualified the prose, but copied it.'}
+        report=nc.render_version(self.root,self.root/'copied',self.response([row]),self.packets)
+        self.assertEqual(report['unchanged_count'],1);self.assertEqual(report['applied_count'],0)
+        self.assertEqual(report['assessment'][0]['status'],'unchanged');self.unchanged()
+
+    def test_review_packet_hash_and_malformed_decisions_fail_closed(self):
+        response=self.response();decision={'response_sha256':nc.sha(response),'evidence_sha256':nc.sha(self.original[ed.NOTES_EVIDENCE]),
+            'packets_sha256':'0'*64,'decisions':[]}
+        with self.assertRaisesRegex(ed.EditorialFailure,'binding'):
+            nc.render_version(self.root,self.root/'changed-packets',response,self.packets,decisions=decision)
+        decision['packets_sha256']=ed.digest(self.packets)
+        for loc in (['malformed'],'missing'):
+            decision['decisions']=[{'passage_id':loc,'decision':'accept','reason':'Invalid target.'}]
+            with self.assertRaisesRegex(ed.EditorialFailure,'invalid_correction_decision'):
+                nc.render_version(self.root,self.root/'bad-decisions',response,self.packets,decisions=decision)
 
     def test_one_request_and_no_retry_after_failure_or_success(self):
         calls=[]

@@ -297,6 +297,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--meeting-notes", action="store_true", help="Opt-in editorial meeting notes and private canonical register, using existing reduction calls")
     parser.add_argument("--meeting-notes-only", action=argparse.BooleanOptionalAction, default=False,
                         help="Stop after the held notes draft; skip separate detailed-minutes and recap generation")
+    parser.add_argument("--meeting-notes-correct", action=argparse.BooleanOptionalAction, default=False,
+                        help="One targeted factual correction request; preserve original and save a separate unverified candidate")
     parser.add_argument("--meeting-notes-output-dir", type=Path, help="New isolated destination required for the editorial prototype")
     parser.add_argument("--meeting-notes-tokenizer", type=Path, help="Required matching local tokenizer.json for editorial reduction budgets (or MEETING_NOTES_TOKENIZER)")
     parser.add_argument("--meeting-notes-thinking", choices=("default", "enabled", "disabled"), default="default", help="Explicit editorial reductions only; confirm installed Ollama/model JSON compatibility before changing the default")
@@ -321,6 +323,8 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
     parser.add_argument("--synthesis-retain-response", action="store_true", help="Explicitly retain a private source-bound evidence response for offline debugging")
 
     args = _args if _args is not None else parser.parse_args()
+    if getattr(args, "meeting_notes_correct", False) and not args.meeting_notes:
+        parser.error("--meeting-notes-correct requires --meeting-notes")
     if getattr(args, "meeting_notes_only", False) and not args.meeting_notes:
         parser.error("--meeting-notes-only requires --meeting-notes")
     checkpoint = getattr(args, "meeting_notes_checkpoint", None)
@@ -730,21 +734,21 @@ def main(default_profile: str | None = None, *, _args=None, _summary_dir=None, _
 
     if profile == "meeting" and args.meeting_notes:
         from meeting_postprocess import editorial
-        def generate_editorial(prompt, *, structured=False, num_predict, response_callback=None):
+        def generate_editorial(prompt, *, structured=False, num_predict, response_callback=None, thinking=None):
             return call_ollama(
                 ollama_url=args.ollama_url, model=args.reduce_model, prompt=prompt,
                 system=(reduce_system + "\nReturn only the requested JSON; no Markdown wrapper." if structured else reduce_system),
                 keep_alive=args.keep_alive, temperature=args.temperature, num_ctx=args.reduce_num_ctx,
                 num_predict=num_predict,
                 response_callback=response_callback,
-                thinking={"default": None, "enabled": True, "disabled": False}[getattr(args, "meeting_notes_thinking", "default")],
+                thinking=thinking if thinking is not None else {"default": None, "enabled": True, "disabled": False}[getattr(args, "meeting_notes_thinking", "default")],
                 **({"response_format": "json"} if structured else {}),
                 **({"usage_callback": _usage_callback} if _usage_callback is not None else {}),
             )
         status = editorial.run(summaries_dir, chunks, combined, current_meeting_combined, recap_combined,
                                commitments, source_context, aliases, approved_passages, redaction_warnings,
                                prompt_dir, generate_editorial, args.keep_recap, budget=editorial_budget,
-                               notes_only=getattr(args, "meeting_notes_only", False))
+                               notes_only=getattr(args, "meeting_notes_only", False), correct=getattr(args, "meeting_notes_correct", False))
         if status:
             return status
 
