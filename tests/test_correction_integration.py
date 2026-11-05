@@ -93,6 +93,12 @@ class CorrectionIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ed.EditorialFailure,'invalid_correction_decision'):
             nc.render_version(case.root,case.root/'unknown',response,case.packets,decisions=decision)
 
+    def test_private_requests_and_candidate_trees_are_ignored_by_git(self):
+        for name in ('private-run/request.private.txt','private-run/notes-correction/candidate/summary.md',
+                     'private-run/correction-response.private.json','private-run/correction-comparison.private.md'):
+            p=subprocess.run(['git','check-ignore','--no-index',name],cwd=ROOT,capture_output=True)
+            self.assertEqual(p.returncode,0,name)
+
     def test_correction_artifacts_enforce_hold_and_private_link_stripping(self):
         from meeting_postprocess.publication import publication_payload,strip_private_references
         for name in (nc.RESPONSE,nc.PACKETS,nc.REPORT,'correction-comparison.private.md'):

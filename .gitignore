@@ -108,3 +108,7 @@ lesson-state/
 dist/
 build/
 *.egg-info/
+
+# Private factual-correction payloads and candidate trees, wherever generated
+*.private.txt
+notes-correction/
