@@ -186,7 +186,7 @@ class EditorialStructureTests(unittest.TestCase):
         valid = {"category": "source_conflict", "text": "Earlier plans need review.", "source_ids": ["2:L2"]}
         malformed = ["source_conflict", {"text": "Former schema without a category.", "source_ids": ["2:L2"]},
                      {**valid, "category": "invented"}, {**valid, "category": []}, {**valid, "category": None},
-                     {**valid, "text": " "}, {**valid, "text": 3}, {**valid, "text": "x" * 6001},
+                     {**valid, "text": " "}, {**valid, "text": 3}, {**valid, "text": "x" * 12001},
                      {**valid, "extra": True}, {"category": "source_conflict", "text": "Missing references."}]
         for concern in malformed:
             with self.subTest(concern=concern):

@@ -36,6 +36,8 @@ FRAMING = 1024
 OUTPUT_TOKENS = {"register": 16384, "notes": 49152, "detailed": 32768, "recap": 8192}
 LOCAL_LINES = 3
 LOCAL_CHARS = 1800
+PRIVATE_CONCERN_LIMIT = 12000
+PRIVATE_CONCERN_REVIEW_CHARS = 6000
 CATEGORIES = {
     "undertaking": "Explicit undertakings and conditional requests",
     "ongoing": "Existing casework in progress",
@@ -659,7 +661,7 @@ def validate_notes(raw, records, source, *, reference_changes=None):
     for index, concern in enumerate(raw["concerns"]):
         if (not _object(concern, "category text source_ids")
                 or not isinstance(concern["category"], str) or concern["category"] not in CONCERNS
-                or not _text(concern["text"])):
+                or not _text(concern["text"], limit=PRIVATE_CONCERN_LIMIT)):
             raise EditorialFailure("invalid_notes_concern")
         # Private concern text may contain the sensitive detail that must never
         # enter member prose. Do not apply _plain's public-content guard here.
@@ -710,9 +712,16 @@ def undertaking_table(register):
 
 
 def notes_concern_findings(notes):
-    return [{"code": concern["category"], "concern_text": concern["text"], "source_ids": concern["source_ids"],
+    findings = [{"code": concern["category"], "concern_text": concern["text"], "source_ids": concern["source_ids"],
              "evidence_pointer": f"{NOTES_EVIDENCE}#/notes/concerns/{index}"}
             for index, concern in enumerate(notes["concerns"])]
+    findings.extend({"code": "long_private_concern_review", "notes_location": f"concerns/{index}",
+                     "characters": len(concern["text"]), "source_ids": concern["source_ids"],
+                     "evidence_pointer": f"{NOTES_EVIDENCE}#/notes/concerns/{index}",
+                     "instruction": "Review this unusually long private concern against its cited source. The full text is retained privately; do not copy it into member notes."}
+                    for index, concern in enumerate(notes["concerns"])
+                    if len(concern["text"]) > PRIVATE_CONCERN_REVIEW_CHARS)
+    return findings
 
 
 def render_notes(notes, register):
