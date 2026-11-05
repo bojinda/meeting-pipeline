@@ -39,10 +39,17 @@ a word target. Original private concerns remain preserved outside member prose.
 Return JSON only with exactly corrections, an array containing ONE entry for each
 packet. Do not propose changes to any other passage. Each entry has exactly:
 passage_id, replacement_text, source_ids, explanation, unresolved_questions,
-evidence_insufficient, support.
+evidence_insufficient, support, disposition.
+
+disposition is edit, no_change or insufficient_evidence. Use no_change only when
+source evidence justifies retaining the exact original wording; give exact supporting
+quotes and explain why each identified concern does not warrant an edit. Do not
+claim to have corrected wording that you copied. A no-change rationale remains
+unverified and requires independent review. Use insufficient_evidence when the
+record cannot justify either an edit or a no-change conclusion.
 
 Example syntax (IDs are examples, never evidence):
-{"corrections":[{"passage_id":"issues/0/paragraphs/0","replacement_text":"A participant reported a disputed decision; its basis was not established.","source_ids":["3:L8"],"explanation":"Preserves attribution rather than asserting an independently established fact.","unresolved_questions":["Does the underlying decision record confirm this account?"],"evidence_insufficient":false,"support":[{"source_id":"3:L8","quote":"an exact verbatim excerpt from that supplied line"}]}]}
+{"corrections":[{"passage_id":"issues/0/paragraphs/0","disposition":"edit","replacement_text":"A participant reported a disputed decision; its basis was not established.","source_ids":["3:L8"],"explanation":"Preserves attribution rather than asserting an independently established fact.","unresolved_questions":["Does the underlying decision record confirm this account?"],"evidence_insufficient":false,"support":[{"source_id":"3:L8","quote":"an exact verbatim excerpt from that supplied line"}]}]}
 
 replacement_text is the COMPLETE revised paragraph, plain prose without headings,
 Markdown, links, source citations or speaker IDs, at most 6,000 characters.

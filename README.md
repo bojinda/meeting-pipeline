@@ -1284,10 +1284,12 @@ Minutes remain comprehensive, without the Meeting Notes word target; Summary,
 private Action Register and editorial source review retain separate purposes.
 Prompt changes and synthetic tests alone do not demonstrate shorter model output.
 
-The summary wrapper enables one targeted factual-correction stage for Meeting
-Notes by default (`MEETING_NOTES_CORRECTION=1`). Set it to `0`, or pass
-`--no-meeting-notes-correct`, to keep the original request count. Direct Python
-callers opt in with `--meeting-notes-correct`. This affects meeting notes only;
+The targeted factual-correction stage is disabled by default
+(`MEETING_NOTES_CORRECTION=0`). An explicit `1` or `--meeting-notes-correct`
+opts into one automatically generated, unverified private candidate. Keep the
+default until unattended qualification and activation are separately reviewed.
+`--no-meeting-notes-correct` overrides configuration. Direct Python callers
+also opt in with `--meeting-notes-correct`. This affects meeting notes only;
 lesson processing, recording, transcription, maps and the register are unchanged.
 Full-document mode completes comprehensive Detailed Minutes before correction.
 The correction request disables thinking explicitly, without changing other model calls.
@@ -1311,7 +1313,14 @@ original downstream draft. All versions remain held and export-blocked. Invalid
 schemas, unknown references, fabricated support quotes, detected new unsupported
 figures/names and explicit sensitive-content violations reject the affected edit.
 Insufficient-evidence entries and verbatim replacements retain the original passage.
-Copied wording is reported as unchanged even if the model claims it corrected a problem. Other eligible edits
+Private reports distinguish meaningful edit candidates, explicit source-quoted
+no-change rationales, insufficient evidence and rejected proposals. Unexplained
+copied wording and formatting-only changes are separate outcomes; they do not
+count as corrections. A justified no-change outcome records the model's rationale,
+not independent semantic verification. Legacy saved responses remain supported.
+Empty/failed replies preserve the successful original run, private request and
+diagnostics; malformed or empty final-answer text is retained when available.
+The stage never retries automatically. Other eligible edits
 may appear in the candidate but require independent semantic and privacy review:
 an exact quote or valid source ID does not prove the proposed relationship.
 

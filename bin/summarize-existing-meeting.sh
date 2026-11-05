@@ -56,10 +56,10 @@ while [ "$#" -gt 0 ]; do
 done
 if [ "$NOTES" = 1 ]; then
   umask 077
-  # One held correction candidate for future meetings after source activation.
+  # Optional held candidate; disabled until unattended qualification is reviewed.
   # Explicit CLI disable takes precedence; lesson processing does not use this.
   if [ "$NOTES_CORRECTION_SET" = 0 ]; then
-    case "${MEETING_NOTES_CORRECTION:-1}" in
+    case "${MEETING_NOTES_CORRECTION:-0}" in
       0) ;;
       1) SUMMARY_OPTIONS+=(--meeting-notes-correct) ;;
       *) echo "ERROR: MEETING_NOTES_CORRECTION must be 0 or 1" >&2; exit 64 ;;

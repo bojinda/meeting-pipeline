@@ -29,7 +29,7 @@ class CorrectionIntegrationTests(unittest.TestCase):
              'support':[{'source_id':'3:L8','quote':'Management directs efficiency tests, yardmasters administer them, operating crews are tested.'}]}
         detailed='# Detailed Minutes\n'+'Comprehensive business. '*1600
         for notes_only,correct,failure in [(True,False,None),(False,False,None),(True,True,None),(False,True,None),
-                                          (False,True,'malformed'),(False,True,'ollama_thinking_only_answer')]:
+                                          (False,True,'malformed'),(False,True,'ollama_thinking_only_answer'),(False,True,'empty'),(False,True,'ollama_transport_failure')]:
             with self.subTest(notes_only=notes_only,correct=correct,failure=failure),tempfile.TemporaryDirectory() as td:
                 calls=[]
                 def generate(prompt,**kwargs):
@@ -38,6 +38,7 @@ class CorrectionIntegrationTests(unittest.TestCase):
                     if len(calls)==2:return json.dumps(notes)
                     if not notes_only and len(calls)==3:return detailed
                     self.assertIs(kwargs['thinking'],False)
+                    if failure=='empty':return ''
                     if failure=='malformed':return '{malformed'
                     if failure:raise GenerationFailure(failure)
                     return json.dumps({'corrections':[row]})
@@ -55,6 +56,12 @@ class CorrectionIntegrationTests(unittest.TestCase):
                     report=json.loads((out/nc.DIRECTORY/nc.REPORT).read_text())
                     self.assertEqual(report['request_attempts'],1);self.assertTrue(report['original_files_unchanged'])
                     self.assertEqual(report['result'],'failed' if failure else 'unverified_candidate')
+                    if failure:
+                        self.assertTrue((out/nc.DIRECTORY/ed.DIAGNOSTICS).is_file())
+                        self.assertTrue((out/nc.DIRECTORY/'request.private.txt').is_file())
+                        if failure=='empty':
+                            self.assertEqual(report['failure_category'],'ollama_empty_final_answer')
+                            self.assertEqual((out/nc.DIRECTORY/nc.RESPONSE).read_bytes(),b'')
                     if not failure:self.assertIn('Unverified correction candidate',(out/nc.DIRECTORY/'candidate/meeting-notes-draft.md').read_text())
                     self.assertEqual(nc.run_once(out,ROOT/'prompts/meeting',generate,Budget())['result'],'already_attempted')
                     self.assertEqual(len(calls),2+int(not notes_only)+1)
@@ -124,7 +131,7 @@ class CorrectionIntegrationTests(unittest.TestCase):
             (root/'input/chunks_out/transcript_chunks.jsonl').write_text('{}\n')
             (root/'bin/summarize-existing-meeting.sh').write_bytes((ROOT/'bin/summarize-existing-meeting.sh').read_bytes())
             (root/'bin/with-gpu-lock.sh').write_text('aihub_run_gpu_stage() { printf "%s\\n" "$@"; }\n')
-            for config,cli,expected in [(None,[],True),('0',[],False),('1',[],True),('1',['--no-meeting-notes-correct'],False),('0',['--meeting-notes-correct'],True)]:
+            for config,cli,expected in [(None,[],False),('0',[],False),('1',[],True),('1',['--no-meeting-notes-correct'],False),('0',['--meeting-notes-correct'],True)]:
                 (root/'config/.env').write_text('' if config is None else 'MEETING_NOTES_CORRECTION='+config+'\n')
                 p=subprocess.run(['bash',str(root/'bin/summarize-existing-meeting.sh'),str(root/'input'),'--meeting-notes',*cli],capture_output=True,text=True)
                 self.assertEqual(p.returncode,0,p.stderr);self.assertEqual('--meeting-notes-correct' in p.stdout.splitlines(),expected)
@@ -139,10 +146,15 @@ class CorrectionIntegrationTests(unittest.TestCase):
     def test_unattended_processing_adds_one_correction_without_repeating_stages(self):
         from test_meeting_notes_workflow import MeetingNotesWorkflowTests
         case=MeetingNotesWorkflowTests();case.setUp();self.addCleanup(case.tearDown)
-        config=case.project/'config/.env';config.write_text(config.read_text().replace('MEETING_NOTES_CORRECTION=0\n',''))
+        self.assertEqual(case.process().returncode,0)
+        baseline=case.notes_dirs()[0]
+        preserved={name:(baseline/name).read_bytes() for name in ('meeting-notes-draft.md','minutes-draft.md',ed.REGISTER,ed.REGISTER_MD)}
+        self.assertFalse((baseline/nc.DIRECTORY).exists())
+        case.calls_file.unlink();case.resources.unlink()
+        config=case.project/'config/.env';config.write_text(config.read_text().replace('MEETING_NOTES_CORRECTION=0\n','MEETING_NOTES_CORRECTION=1\n'))
         case.env['NOTES_TEST_CORRECTION']='1'
         p=case.process();self.assertEqual(p.returncode,0,p.stderr)
-        out=case.notes_dirs()[0];calls=[json.loads(line) for line in case.calls_file.read_text().splitlines()]
+        out=next(d for d in case.notes_dirs() if d != baseline);calls=[json.loads(line) for line in case.calls_file.read_text().splitlines()]
         reduced=[c for c in calls if 'Transcript chunk:' not in c['prompt']]
         self.assertEqual(len(reduced),4)
         self.assertEqual(sum('propose ONE private canonical' in c['prompt'] for c in calls),1)
@@ -158,3 +170,12 @@ class CorrectionIntegrationTests(unittest.TestCase):
         self.assertIn('Unverified correction candidate',(candidate/'meeting-notes-draft.md').read_text())
         self.assertNotIn('alleged',(candidate/'meeting-notes-draft.md').read_text())
         self.assertNotIn('PRIVATE_SECRET',json.dumps(calls))
+        for name in ('minutes-draft.md',ed.REGISTER,ed.REGISTER_MD):self.assertEqual((out/name).read_bytes(),preserved[name])
+        self.assertEqual((candidate/ed.REGISTER_MD).read_bytes(),preserved[ed.REGISTER_MD])
+        self.assertTrue((candidate/ed.TRACE).is_file())
+        self.assertIn('Staffing remains unresolved',(candidate/ed.TRACE).read_text())
+        from meeting_postprocess.publication import publication_payload,export_archive
+        for directory in (out,candidate):
+            with self.assertRaisesRegex(ValueError,'hold'):publication_payload(directory)
+            with self.assertRaisesRegex(ValueError,'hold'):export_archive(directory,case.root/'export.zip')
+        self.assertFalse((case.root/'export.zip').exists())

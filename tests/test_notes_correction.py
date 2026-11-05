@@ -120,3 +120,24 @@ class CorrectionTests(unittest.TestCase):
                ('A complaint was filed.','claim_certainty_review'),('A member with a medical issue is a single parent.','member_identifiability_review'),
                ('The chemical was benzene.','substance_identity_review'),('The ABC system applies.','terminology_support_review')]
         for text,code in cases:self.assertIn(code,{c for c,_ in factual_risks(text,'Uncertain testimony.')})
+
+    def test_distinct_report_outcomes_and_legacy_copied_text(self):
+        variants=[(dict(self.row,disposition='edit'),'meaningful_edit_candidate'),
+                  (dict(self.row,disposition='no_change',replacement_text=self.notes['issues'][0]['paragraphs'][0]['text']),'justified_no_change'),
+                  (dict(self.row,disposition='insufficient_evidence',evidence_insufficient=True,replacement_text=None,source_ids=[],support=[]),'insufficient_evidence'),
+                  (dict(self.row,source_ids=['missing']),'rejected'),
+                  (dict(self.row,replacement_text=self.notes['issues'][0]['paragraphs'][0]['text']),'unexplained_unchanged')]
+        for i,(row,outcome) in enumerate(variants):
+            with self.subTest(outcome=outcome):
+                report=nc.render_version(self.root,self.root/str(i),self.response([row]),self.packets)
+                self.assertEqual(report['assessment'][0]['outcome'],outcome)
+                self.assertEqual(report['outcome_counts'][outcome],1)
+                self.assertFalse(report['automated_checks_certify_semantic_accuracy'])
+                self.assertEqual(report['applied_count'],int(outcome=='meaningful_edit_candidate'))
+                self.unchanged()
+
+    def test_no_change_and_insufficient_evidence_cannot_hide_bad_references(self):
+        for row in (dict(self.row,disposition='no_change'),
+                    dict(self.row,disposition='insufficient_evidence',evidence_insufficient=True,replacement_text=None,source_ids=['missing']),
+                    dict(self.row,disposition='no_change',replacement_text=self.notes['issues'][0]['paragraphs'][0]['text'],support=[])):
+            self.assertEqual(nc.assess({'corrections':[row]},self.packets,self.notes,self.records)[0]['status'],'rejected')

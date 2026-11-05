@@ -73,19 +73,20 @@ def assess(raw, packets, original, records):
         result={'proposal_index':index,'status':'rejected','reason':'invalid_correction_schema'}
         if isinstance(row,dict) and isinstance(row.get('passage_id'),str):result['passage_id']=row['passage_id']
         try:
-            if (not ed._object(row,FIELDS) or row.get('passage_id') not in targets
+            if (not (ed._object(row,FIELDS) or ed._object(row,FIELDS+' disposition')) or row.get('passage_id') not in targets
                     or counts.get(row['passage_id'])!=1 or type(row['evidence_insufficient']) is not bool
                     or not ed._text(row['explanation'],limit=3000) or not ed._list(row['unresolved_questions'])
                     or any(not ed._text(q,limit=2000) for q in row['unresolved_questions'])
                     or not ed._list(row['source_ids']) or not ed._list(row['support'])):
                 raise ed.EditorialFailure('invalid_correction_schema')
+            disposition=row.get('disposition','insufficient_evidence' if row['evidence_insufficient'] else 'edit')
+            if disposition not in ('edit','no_change','insufficient_evidence') or (disposition=='insufficient_evidence')!=row['evidence_insufficient']:
+                raise ed.EditorialFailure('invalid_correction_disposition')
             if row['evidence_insufficient']:
                 if row['replacement_text'] is not None:raise ed.EditorialFailure('insufficient_evidence_replacement')
-                result.update(status='insufficient_evidence',reason='retain_original_with_review_flag')
-                results.append(result);continue
-            ed._plain(row['replacement_text'],identity_review=True)
+            else:ed._plain(row['replacement_text'],identity_review=True)
             refs=row['source_ids'];allowed=set(targets[row['passage_id']]['context_source_ids'])
-            if (not refs or any(not isinstance(k,str) or k not in allowed for k in refs)
+            if (not refs and not row['evidence_insufficient'] or any(not isinstance(k,str) or k not in allowed for k in refs)
                     or len(set(refs))!=len(refs)):
                 raise ed.EditorialFailure('invalid_correction_references')
             quoted=[]
@@ -96,6 +97,11 @@ def assess(raw, packets, original, records):
                     raise ed.EditorialFailure('correction_quote_not_exact')
                 quoted.append(item['source_id'])
             if set(quoted)!=set(refs):raise ed.EditorialFailure('correction_unquoted_reference')
+            if row['evidence_insufficient']:
+                result.update(status='insufficient_evidence',reason='retain_original_with_review_flag')
+                results.append(result);continue
+            if disposition=='no_change' and row['replacement_text']!=old[row['passage_id']]['text']:
+                raise ed.EditorialFailure('no_change_contains_edit')
             source='\n'.join(records[k]['text'] for k in refs)
             # Reject new numerical assertions absent even lexically from the
             # supplied evidence. Spelled-number equivalence needs source review.
@@ -109,7 +115,10 @@ def assess(raw, packets, original, records):
             ed.validate_notes(candidate,records,'\n'.join(r['text'] for r in records.values()))
             risk=[{'code':code,'instruction':instruction} for code,instruction in factual_risks(row['replacement_text'],source)]
             if row['replacement_text']==old[row['passage_id']]['text']:
-                result.update(status='unchanged',reason='no_text_change_review_remains',risk_findings=risk)
+                result.update(status='justified_no_change_unverified' if disposition=='no_change' else 'unchanged',
+                              reason='model_source_rationale_requires_review' if disposition=='no_change' else 'no_text_change_review_remains',risk_findings=risk)
+            elif re.findall(r'\w+',row['replacement_text'].casefold())==re.findall(r'\w+',old[row['passage_id']]['text'].casefold()):
+                result.update(status='non_substantive_change',reason='formatting_only_review_remains',risk_findings=risk)
             else:
                 result.update(status='eligible_unverified',reason='independent_semantic_review_required',risk_findings=risk)
         except (KeyError,TypeError,ValueError) as exc:
@@ -162,6 +171,14 @@ def render_version(parent, output, response, packets, *, decisions=None):
             replace_block(notes,loc,row['replacement_text'],row['source_ids']);applied.append(loc)
         elif decision and decision['decision']=='accept':
             raise ed.EditorialFailure('cannot_accept_invalid_correction')
+    # Report model proposals separately from independent private edit decisions.
+    categories={'eligible_unverified':'meaningful_edit_candidate','justified_no_change_unverified':'justified_no_change',
+                'insufficient_evidence':'insufficient_evidence','rejected':'rejected','unchanged':'unexplained_unchanged',
+                'non_substantive_change':'non_substantive_change','missing':'missing'}
+    for item in assessment:
+        item['category']=categories[item['status']]
+        item['outcome']='rejected' if item.get('independent_review',{}).get('decision')=='reject' else item['category']
+    outcome_counts={key:sum(a['outcome']==key for a in assessment) for key in dict.fromkeys(categories.values())}
     source='\n'.join(r['text'] for r in records.values() if r['section'] in {ed.BUSINESS,ed.ADJOURNMENT})
     clean=ed.validate_notes(notes,records,source)
     output.mkdir(mode=0o700)
@@ -179,6 +196,7 @@ def render_version(parent, output, response, packets, *, decisions=None):
         if (parent/name).exists():(output/name).write_bytes((parent/name).read_bytes())
     report={'status':'review_hold','mode':mode,'candidate_selected':False,'response_sha256':sha(response),'evidence_sha256':sha(evidence_bytes),
             'packets_sha256':ed.digest(packets),'unchanged_count':sum(a['status']=='unchanged' for a in assessment),
+            'outcome_counts':outcome_counts,'automated_checks_certify_semantic_accuracy':False,
             'proposed_count':len(raw['corrections']),'applied_passages':applied,'applied_count':len(applied),
             'unapplied_count':len(raw['corrections'])-len(applied),'assessment':assessment,'word_count':review['notes_word_count'],
             'semantic_accuracy':'Independent source review required; valid references and exact quotes are not proof.',
@@ -190,7 +208,7 @@ def render_version(parent, output, response, packets, *, decisions=None):
     lines=['# Private factual-correction comparison','','Review hold. Unverified proposals; no distribution or action approval.','']
     lookup=dict(blocks(original))
     for item in assessment:
-        loc=item.get('passage_id','unknown');lines += ['## '+loc,'', 'Status: '+item['status']+'; '+item['reason'],'']
+        loc=item.get('passage_id','unknown');lines += ['## '+loc,'', 'Outcome: '+item['outcome']+'; status: '+item['status']+'; '+item['reason'],'']
         if loc in lookup:lines+=['### Original','',_literal(lookup[loc]['text']),'']
         if 'proposal_index' not in item:continue
         row=raw['corrections'][item['proposal_index']]
@@ -231,7 +249,9 @@ def run_once(directory, prompts, generate, budget, *, selections=None):
         def callback(info):ed.write_private_json(out/ed.DIAGNOSTICS,{'requests':[{'stage':'correction',**info}]})
         result['request_attempts']=1
         answer=generate(prompt,structured=True,num_predict=measured['reserved_output'],response_callback=callback,thinking=False)
+        if not isinstance(answer,str):raise ed.EditorialFailure('ollama_invalid_response')
         raw=answer.encode('utf-8');(out/RESPONSE).write_bytes(raw)
+        if not answer.strip():raise ed.EditorialFailure('ollama_empty_final_answer')
         report=render_version(parent,out/'candidate',raw,packets)
         result.update(result='unverified_candidate',proposed_count=report['proposed_count'],applied_count=report['applied_count'],unchanged_count=report['unchanged_count'],
                       word_count=report['word_count'],unselected_passages=unselected)
@@ -241,6 +261,9 @@ def run_once(directory, prompts, generate, budget, *, selections=None):
     finally:
         result['original_files_unchanged']=all((parent/k).read_bytes()==v for k,v in protected.items())
         if not result['original_files_unchanged']:result.update(result='failed',failure_category='correction_original_drift')
+        if result['result']=='failed' and not (out/ed.DIAGNOSTICS).exists():
+            ed.write_private_json(out/ed.DIAGNOSTICS,{'requests':[{'stage':'correction','failure_category':result.get('failure_category'),
+                                  'request_attempts':result['request_attempts'],'backend_metadata_available':False}]})
         ed.write_private_json(out/REPORT,result)
         for p in out.iterdir():
             if p.is_file():p.chmod(0o600)

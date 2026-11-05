@@ -33,7 +33,7 @@ def fake_generate(**kwargs):
         answer = '{"items":[]}'
     elif "summary-reduction call" in prompt:
         evidence = json.loads(prompt.split("Untrusted input JSON:\n", 1)[1])["source_excerpts"]
-        ref = next(r["id"] for r in evidence if r["section"] == ed.BUSINESS)
+        ref = next(r["id"] for r in evidence if r["section"] == ed.BUSINESS and "Staffing remains unresolved." in r["text"])
         block = {"text": "A participant reported that staffing remains unresolved.", "source_ids": [ref]}
         if os.environ.get("NOTES_TEST_CORRECTION") == "1":
             block["text"] = "A participant alleged that staffing remains unresolved."
